@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Wonton Writer</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, update }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  🔥 FIREBASE CONFIG — YOUR UPDATED CREDENTIALS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAVWJivcsDjX3eY4_QN7SA3LUrzHmv7m8U",
+  authDomain: "wonton-writer.firebaseapp.com",
+  databaseURL: "https://wonton-writer-default-rtdb.firebaseio.com",
+  projectId: "wonton-writer",
+  storageBucket: "wonton-writer.firebasestorage.app",
+  messagingSenderId: "1048777970258",
+  appId: "1:1048777970258:web:a2334963eb523de858058b",
+  measurementId: "G-CZSG5VDVLG"
+};
+
+const app = initializeApp(FIREBASE_CONFIG);
+const db = getDatabase(app);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  CONTENT & UTILS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const PROMPT_TEMPLATES = [
+  "A ___ discovers that their ___ has been ___ for years.",
+  "Every morning, ___ finds a ___ on their doorstep with no explanation.",
+  "When ___ finally opened the ___, they found ___ inside.",
+  "The recipe called for ___, ___, and one secret ingredient: ___.",
+  "The ___ was haunted, but not by a ghost — by ___.",
+  "The note read: '___. Do not ___. It's already too late for ___.'"
+];
+
+const STORY_DETAILS = [
+  "a red umbrella that belongs to someone else",
+  "the persistent smell of burnt toast with no source",
+  "a locked box with no keyhole",
+  "a photograph that's slightly different every time you look at it",
+  "a voicemail from a number that doesn't exist",
+  "a reflection that lags half a second behind"
+];
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pick(arr, n) { return shuffle(arr).slice(0, n); }
+
+function fmt(s) {
+  const m = Math.floor(Math.max(0, s) / 60).toString().padStart(2, "0");
+  const sec = (Math.max(0, s) % 60).toString().padStart(2, "0");
+  return `${m}:${sec}`;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  UI COMPONENTS (Bubbly Style)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function Logo({ small }) {
+  return (
+    <div className={`logo ${small ? "logo-small" : ""}`}>
+      <div className="logo-inner">
+        <span className="logo-sup">WON TON</span>
+        <span className="logo-word">WRITER</span>
+        <span className="logo-sub">✏️</span>
+      </div>
+    </div>
+  );
+}
+
+function Btn({ children, onClick, variant = "primary", disabled, className = "" }) {
+  return (
+    <button 
+      className={`btn btn-${variant} ${className}`} 
+      onClick={onClick} 
+      disabled={disabled}
+    >{children}</button>
+  );
+}
+
+function Card({ children, className = "", glow }) {
+  return <div className={`card ${className} ${glow ? "card-glow" : ""}`}>{children}</div>;
+}
+
+function Tag({ children, color = "yellow" }) {
+  return <span className={`tag tag-${color}`}>{children}</span>;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  GAME ENGINE HOOKS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function useTimer(initialSeconds, running, onExpire) {
+  const [seconds, setSeconds] = useState(initialSeconds);
+  const expiredRef = useRef(false);
+
+  useEffect(() => {
+    setSeconds(initialSeconds);
+    expiredRef.current = false;
+  }, [initialSeconds]);
+
+  useEffect(() => {
+    if (!running) return;
+    const interval = setInterval(() => {
+      setSeconds(s => {
+        if (s <= 1) {
+          clearInterval(interval);
+          if (!expiredRef.current) {
+            expiredRef.current = true;
+            onExpire?.();
+          }
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [running]);
+
+  return seconds;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SCREEN: ONLINE WRITING ROUND
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function OnlineWritingRound({ room, playerName }) {
+  const [text, setText] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  
+  const players = room.playerList;
+  const playerCount = players.length;
+  const myIndex = players.indexOf(playerName);
+  const currentRound = room.currentRound || 0;
+  
+  // Logic: Each player is assigned a "Starting Story" based on their index.
+  // Every round, we rotate which story they are working on.
+  const storyOwnerIndex = (myIndex + currentRound) % playerCount;
+  const storyOwnerName = players[storyOwnerIndex];
+  const storyData = room.stories?.[storyOwnerName] || {};
+  const segments = storyData.segments || [];
+  
+  const isFirstRound = currentRound === 0;
+  const prevSegment = segments.length > 0 ? segments[segments.length - 1].text : null;
+
+  // Your Specific Timing Rules
+  const getRoundTime = () => {
+    if (playerCount === 2) return 30 * 60;
+    if (playerCount === 3) return 20 * 60;
+    if (playerCount === 4) return 15 * 60;
+    if (playerCount === 5) return currentRound === 0 ? 20 * 60 : 10 * 60;
+    return 10 * 60;
+  };
+
+  const seconds = useTimer(getRoundTime(), !submitted, () => handleNext());
+
+  const handleNext = async () => {
+    if (submitted) return;
+    setSubmitted(true);
+    
+    // Save my segment to the story I am currently holding
+    const segmentRef = `rooms/${room.code}/stories/${storyOwnerName}/segments`;
+    const newSegments = [...segments, { author: playerName, text: text || "..." }];
+    
+    await update(ref(db, `rooms/${room.code}/stories/${storyOwnerName}`), {
+      segments: newSegments
+    });
+
+    // Mark as ready for next round
+    await update(ref(db, `rooms/${room.code}/readyCheck/${playerName}`), {
+      ready: true,
+      round: currentRound
+    });
+  };
+
+  // Host-only: Check if everyone is ready to move to the next round
+  useEffect(() => {
+    if (playerName !== room.host) return;
+    const readyPlayers = Object.values(room.readyCheck || {}).filter(p => p.round === currentRound);
+    
+    if (readyPlayers.length === playerCount) {
+      if (currentRound + 1 < playerCount) {
+        // Next Round
+        update(ref(db, `rooms/${room.code}`), { 
+          currentRound: currentRound + 1,
+          readyCheck: {} 
+        });
+      } else {
+        // Game Over
+        update(ref(db, `rooms/${room.code}`), { phase: "reveal" });
+      }
+    }
+  }, [room.readyCheck, room.currentRound]);
+
+  if (submitted) {
+    return (
+      <div className="screen center-screen">
+        <Card className="handoff-card">
+          <div className="handoff-emoji">☁️</div>
+          <h2>Segment Saved!</h2>
+          <p className="muted">Waiting for other writers to finish...</p>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="screen writing-screen">
+      <div className="writing-top">
+        <span className="writer-badge">Round {currentRound + 1} / {playerCount}</span>
+        <div className={`timer-badge ${seconds < 60 ? "urgent" : ""}`}>{fmt(seconds)}</div>
+      </div>
+
+      <div className="story-context">
+        <div className="context-label">{isFirstRound ? "Starting Prompt" : "Last Person Wrote:"}</div>
+        <div className="context-box prev-box">
+          {isFirstRound ? storyData.prompt : prevSegment}
+        </div>
+        {storyData.details?.length > 0 && (
+          <div className="details-strip">
+            <span className="details-label">Include:</span>
+            {storyData.details.map((d, i) => <Tag key={i} color="yellow">{d}</Tag>)}
+          </div>
+        )}
+      </div>
+
+      <textarea 
+        className="writing-area" 
+        value={text} 
+        onChange={e => setText(e.target.value)} 
+        placeholder="Continue the story here..."
+        autoFocus
+      />
+      
+      <Btn onClick={handleNext}>Finish Segment →</Btn>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ROOT APP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export default function App() {
+  const [screen, setScreen] = useState("home");
+  const [roomCode, setRoomCode] = useState("");
+  const [userName, setUserName] = useState("");
+  const [room, setRoom] = useState(null);
+
+  useEffect(() => {
+    if (!roomCode) return;
+    const roomRef = ref(db, `rooms/${roomCode}`);
+    return onValue(roomRef, (snap) => setRoom(snap.val()));
+  }, [roomCode]);
+
+  const createRoom = async () => {
+    if (!userName) return;
+    const code = Math.random().toString(36).substring(2, 7).toUpperCase();
+    setRoomCode(code);
+    await set(ref(db, `rooms/${code}`), {
+      code,
+      host: userName,
+      phase: "lobby",
+      playerList: [userName],
+      currentRound: 0,
+      stories: {}
+    });
+    setScreen("lobby");
+  };
+
+  const joinRoom = async () => {
+    const snap = await get(ref(db, `rooms/${roomCode}`));
+    if (snap.exists()) {
+      const data = snap.val();
+      await update(ref(db, `rooms/${roomCode}`), {
+        playerList: [...data.playerList, userName]
+      });
+      setScreen("lobby");
+    }
+  };
+
+  const startGame = async () => {
+    const stories = {};
+    room.playerList.forEach(p => {
+      stories[p] = {
+        prompt: pick(PROMPT_TEMPLATES, 1)[0],
+        details: pick(STORY_DETAILS, 2),
+        segments: []
+      };
+    });
+    await update(ref(db, `rooms/${roomCode}`), { phase: "play", stories });
+  };
+
+  return (
+    <>
+      <style>{CSS}</style>
+      <div className="app">
+        {screen === "home" && (
+          <div className="screen center-screen">
+            <Logo />
+            <Card>
+              <input className="input" placeholder="Your Name" value={userName} onChange={e => setUserName(e.target.value)} />
+              <Btn onClick={createRoom}>Host New Game</Btn>
+              <div className="divider">or</div>
+              <input className="input" placeholder="Room Code" value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} />
+              <Btn variant="secondary" onClick={joinRoom}>Join Game</Btn>
+            </Card>
+          </div>
+        )}
+
+        {screen === "lobby" && room && (
+          <div className="screen">
+            <Logo small />
+            <Card className="room-code-display">
+              <span className="room-code-label">Room Code</span>
+              <span className="room-code-value">{room.code}</span>
+            </Card>
+            <Card>
+              <div className="field-label">Players ({room.playerList.length}/6)</div>
+              {room.playerList.map(p => (
+                <div key={p} className="player-pill"><span className="player-dot" /> {p}</div>
+              ))}
+            </Card>
+            {room.host === userName && (
+              <Btn onClick={startGame} disabled={room.playerList.length < 2}>Start Game</Btn>
+            )}
+            {room.phase === "play" && <Btn onClick={() => setScreen("play")}>Enter Game →</Btn>}
+          </div>
+        )}
+
+        {screen === "play" && room && (
+          <OnlineWritingRound room={room} playerName={userName} />
+        )}
+        
+        {room?.phase === "reveal" && (
+          <div className="screen">
+             <Logo small />
+             <h2 className="reveal-title">Game Over!</h2>
+             <p>Check the host screen to read your stories aloud!</p>
+             <Btn onClick={() => window.location.reload()}>Back to Home</Btn>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  STYLES (Bubbly & Gamey)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Righteous&family=DM+Sans:wght@400;700&display=swap');
+
+:root {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --accent: #8b5cf6;
+  --accent-grad: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
+  --text: #f8fafc;
+  --r: 24px;
+}
+
+body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; }
+.app { display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+.screen { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 20px; animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.center-screen { justify-content: center; min-height: 80vh; }
+
+@keyframes pop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+
+.logo-inner { 
+  background: var(--surface); border: 4px solid var(--accent); 
+  border-radius: var(--r); padding: 20px; text-align: center;
+  box-shadow: 0 10px 0 var(--accent);
+}
+.logo-word { font-family: 'Righteous'; font-size: 32px; color: #fff; }
+
+.card { 
+  background: var(--surface); border-radius: var(--r); padding: 24px; 
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);
+}
+
+.btn { 
+  background: var(--accent-grad); color: #fff; border: none; 
+  border-radius: 16px; padding: 16px; font-family: 'Righteous'; 
+  font-size: 18px; cursor: pointer; transition: 0.2s;
+}
+.btn:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(139, 92, 246, 0.4); }
+.btn-secondary { background: #334155; }
+
+.input { 
+  background: #0f172a; border: 2px solid #334155; border-radius: 12px; 
+  padding: 12px; color: #fff; font-size: 16px; margin-bottom: 10px; width: 100%;
+}
+
+.room-code-value { font-family: 'Righteous'; font-size: 48px; color: #a855f7; display: block; text-align: center; }
+
+.writing-area {
+  background: #0f172a; border: 2px solid var(--accent); border-radius: var(--r);
+  padding: 20px; color: #fff; font-size: 18px; min-height: 250px; outline: none;
+}
+
+.tag { background: #fbbf2422; border: 1px solid #fbbf24; color: #fbbf24; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+.divider { text-align: center; margin: 10px; opacity: 0.5; }
+`;
+  </script>
+</body>
+</html>
