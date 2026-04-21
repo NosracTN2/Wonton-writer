@@ -1,13 +1,38 @@
 {
   "prompts": [
     "A detective discovers the victim was actually their ___.",
-    "The safe was finally cracked open, but inside was only a single ___."
+    "The safe was finally cracked open, but inside was only a single ___.",
+    "The ransom note demanded one million dollars and a ___.",
+    "They said the basement was empty, but I hear ___ down there.",
+    "I hired a private investigator to follow my spouse, but they found ___ instead.",
+    "The police arrived at the crime scene, only to find a ___.",
+    "Every time I sneeze, I travel ___ minutes into the future.",
+    "My robot butler started acting weird when it saw the ___.",
+    "NASA just released a photo of Mars, and right in the center is a ___.",
+    "It turns out the moon isn't made of rock, it's actually a giant ___.",
+    "My new smartwatch doesn't tell time, it tells me ___.",
+    "The secret ingredient in the famous soup was ___ all along.",
+    "Never trust a person who carries a ___ in their pocket.",
+    "I accidentally pressed the red button, and suddenly ___."
   ],
   "safetyPrompts": [
-    "The lights flickered, and when they came back on, the front door had vanished."
+    "The lights flickered, and when they came back on, the front door had vanished.",
+    "The stray cat jumped onto the table and spoke to me.",
+    "I looked into the mirror, but my reflection was staring at the ceiling."
   ],
   "details": [
-    "raw chicken", "a wet fart", "a suspiciously sticky sock"
+    "raw chicken",
+    "butt stuff",
+    "explosive diarrhea",
+    "a wet fart",
+    "an awkwardly timed boner",
+    "a suspiciously sticky sock",
+    "a politely menacing stray cat",
+    "a guy in a full mascot suit",
+    "a grandfather clock that ticks backward",
+    "a heavily rusted key",
+    "the smell of burnt popcorn",
+    "a text saying 'Look up'"
   ],
   "wordGroups": [
     ["POP", "PEP", "PAP", "PUP", "PIE", "POT", "PAN", "PIN"],
@@ -15,6 +40,10 @@
     ["DOG", "LOG", "BOG", "DIG", "DOT", "DON", "DUG", "FOG"]
   ],
   "tooltips": [
-    "Pro-tip: Kill off a main character."
+    "Pro-tip: Kill off a main character.",
+    "Did you know? The longest novel ever written is over 13,000 pages.",
+    "Pro-tip: Introduce a sudden explosion.",
+    "Reminder: Don't forget your details!",
+    "Pro-tip: Make it deeply uncomfortable."
   ]
 }
