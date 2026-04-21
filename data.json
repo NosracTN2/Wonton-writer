@@ -1,0 +1,20 @@
+{
+  "prompts": [
+    "A detective discovers the victim was actually their ___.",
+    "The safe was finally cracked open, but inside was only a single ___."
+  ],
+  "safetyPrompts": [
+    "The lights flickered, and when they came back on, the front door had vanished."
+  ],
+  "details": [
+    "raw chicken", "a wet fart", "a suspiciously sticky sock"
+  ],
+  "wordGroups": [
+    ["POP", "PEP", "PAP", "PUP", "PIE", "POT", "PAN", "PIN"],
+    ["CAT", "BAT", "COT", "CUT", "CAR", "CAP", "CAN", "CAB"],
+    ["DOG", "LOG", "BOG", "DIG", "DOT", "DON", "DUG", "FOG"]
+  ],
+  "tooltips": [
+    "Pro-tip: Kill off a main character."
+  ]
+}
