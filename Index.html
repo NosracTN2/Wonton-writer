@@ -1,420 +1,1202 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Wonton Writer</title>
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-</head>
-<body>
-  <div id="root"></div>
-  <script type="text/babel">
-    import { useState, useEffect, useRef } from "react";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, onValue, update }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  🔥 FIREBASE CONFIG — YOUR UPDATED CREDENTIALS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAVWJivcsDjX3eY4_QN7SA3LUrzHmv7m8U",
-  authDomain: "wonton-writer.firebaseapp.com",
-  databaseURL: "https://wonton-writer-default-rtdb.firebaseio.com",
-  projectId: "wonton-writer",
-  storageBucket: "wonton-writer.firebasestorage.app",
-  messagingSenderId: "1048777970258",
-  appId: "1:1048777970258:web:a2334963eb523de858058b",
-  measurementId: "G-CZSG5VDVLG"
-};
-
-const app = initializeApp(FIREBASE_CONFIG);
-const db = getDatabase(app);
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  CONTENT & UTILS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const PROMPT_TEMPLATES = [
-  "A ___ discovers that their ___ has been ___ for years.",
-  "Every morning, ___ finds a ___ on their doorstep with no explanation.",
-  "When ___ finally opened the ___, they found ___ inside.",
-  "The recipe called for ___, ___, and one secret ingredient: ___.",
-  "The ___ was haunted, but not by a ghost — by ___.",
-  "The note read: '___. Do not ___. It's already too late for ___.'"
-];
-
-const STORY_DETAILS = [
-  "a red umbrella that belongs to someone else",
-  "the persistent smell of burnt toast with no source",
-  "a locked box with no keyhole",
-  "a photograph that's slightly different every time you look at it",
-  "a voicemail from a number that doesn't exist",
-  "a reflection that lags half a second behind"
-];
-
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function pick(arr, n) { return shuffle(arr).slice(0, n); }
-
-function fmt(s) {
-  const m = Math.floor(Math.max(0, s) / 60).toString().padStart(2, "0");
-  const sec = (Math.max(0, s) % 60).toString().padStart(2, "0");
-  return `${m}:${sec}`;
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  UI COMPONENTS (Bubbly Style)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function Logo({ small }) {
-  return (
-    <div className={`logo ${small ? "logo-small" : ""}`}>
-      <div className="logo-inner">
-        <span className="logo-sup">WON TON</span>
-        <span className="logo-word">WRITER</span>
-        <span className="logo-sub">✏️</span>
-      </div>
-    </div>
-  );
-}
-
-function Btn({ children, onClick, variant = "primary", disabled, className = "" }) {
-  return (
-    <button 
-      className={`btn btn-${variant} ${className}`} 
-      onClick={onClick} 
-      disabled={disabled}
-    >{children}</button>
-  );
-}
-
-function Card({ children, className = "", glow }) {
-  return <div className={`card ${className} ${glow ? "card-glow" : ""}`}>{children}</div>;
-}
-
-function Tag({ children, color = "yellow" }) {
-  return <span className={`tag tag-${color}`}>{children}</span>;
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  GAME ENGINE HOOKS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function useTimer(initialSeconds, running, onExpire) {
-  const [seconds, setSeconds] = useState(initialSeconds);
-  const expiredRef = useRef(false);
-
-  useEffect(() => {
-    setSeconds(initialSeconds);
-    expiredRef.current = false;
-  }, [initialSeconds]);
-
-  useEffect(() => {
-    if (!running) return;
-    const interval = setInterval(() => {
-      setSeconds(s => {
-        if (s <= 1) {
-          clearInterval(interval);
-          if (!expiredRef.current) {
-            expiredRef.current = true;
-            onExpire?.();
-          }
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [running]);
-
-  return seconds;
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  SCREEN: ONLINE WRITING ROUND
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function OnlineWritingRound({ room, playerName }) {
-  const [text, setText] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  
-  const players = room.playerList;
-  const playerCount = players.length;
-  const myIndex = players.indexOf(playerName);
-  const currentRound = room.currentRound || 0;
-  
-  // Logic: Each player is assigned a "Starting Story" based on their index.
-  // Every round, we rotate which story they are working on.
-  const storyOwnerIndex = (myIndex + currentRound) % playerCount;
-  const storyOwnerName = players[storyOwnerIndex];
-  const storyData = room.stories?.[storyOwnerName] || {};
-  const segments = storyData.segments || [];
-  
-  const isFirstRound = currentRound === 0;
-  const prevSegment = segments.length > 0 ? segments[segments.length - 1].text : null;
-
-  // Your Specific Timing Rules
-  const getRoundTime = () => {
-    if (playerCount === 2) return 30 * 60;
-    if (playerCount === 3) return 20 * 60;
-    if (playerCount === 4) return 15 * 60;
-    if (playerCount === 5) return currentRound === 0 ? 20 * 60 : 10 * 60;
-    return 10 * 60;
-  };
-
-  const seconds = useTimer(getRoundTime(), !submitted, () => handleNext());
-
-  const handleNext = async () => {
-    if (submitted) return;
-    setSubmitted(true);
-    
-    // Save my segment to the story I am currently holding
-    const segmentRef = `rooms/${room.code}/stories/${storyOwnerName}/segments`;
-    const newSegments = [...segments, { author: playerName, text: text || "..." }];
-    
-    await update(ref(db, `rooms/${room.code}/stories/${storyOwnerName}`), {
-      segments: newSegments
-    });
-
-    // Mark as ready for next round
-    await update(ref(db, `rooms/${room.code}/readyCheck/${playerName}`), {
-      ready: true,
-      round: currentRound
-    });
-  };
-
-  // Host-only: Check if everyone is ready to move to the next round
-  useEffect(() => {
-    if (playerName !== room.host) return;
-    const readyPlayers = Object.values(room.readyCheck || {}).filter(p => p.round === currentRound);
-    
-    if (readyPlayers.length === playerCount) {
-      if (currentRound + 1 < playerCount) {
-        // Next Round
-        update(ref(db, `rooms/${room.code}`), { 
-          currentRound: currentRound + 1,
-          readyCheck: {} 
-        });
-      } else {
-        // Game Over
-        update(ref(db, `rooms/${room.code}`), { phase: "reveal" });
-      }
-    }
-  }, [room.readyCheck, room.currentRound]);
-
-  if (submitted) {
-    return (
-      <div className="screen center-screen">
-        <Card className="handoff-card">
-          <div className="handoff-emoji">☁️</div>
-          <h2>Segment Saved!</h2>
-          <p className="muted">Waiting for other writers to finish...</p>
-        </Card>
-      </div>
-    );
-  }
-
-  return (
-    <div className="screen writing-screen">
-      <div className="writing-top">
-        <span className="writer-badge">Round {currentRound + 1} / {playerCount}</span>
-        <div className={`timer-badge ${seconds < 60 ? "urgent" : ""}`}>{fmt(seconds)}</div>
-      </div>
-
-      <div className="story-context">
-        <div className="context-label">{isFirstRound ? "Starting Prompt" : "Last Person Wrote:"}</div>
-        <div className="context-box prev-box">
-          {isFirstRound ? storyData.prompt : prevSegment}
-        </div>
-        {storyData.details?.length > 0 && (
-          <div className="details-strip">
-            <span className="details-label">Include:</span>
-            {storyData.details.map((d, i) => <Tag key={i} color="yellow">{d}</Tag>)}
-          </div>
-        )}
-      </div>
-
-      <textarea 
-        className="writing-area" 
-        value={text} 
-        onChange={e => setText(e.target.value)} 
-        placeholder="Continue the story here..."
-        autoFocus
-      />
-      
-      <Btn onClick={handleNext}>Finish Segment →</Btn>
-    </div>
-  );
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  ROOT APP
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-export default function App() {
-  const [screen, setScreen] = useState("home");
-  const [roomCode, setRoomCode] = useState("");
-  const [userName, setUserName] = useState("");
-  const [room, setRoom] = useState(null);
-
-  useEffect(() => {
-    if (!roomCode) return;
-    const roomRef = ref(db, `rooms/${roomCode}`);
-    return onValue(roomRef, (snap) => setRoom(snap.val()));
-  }, [roomCode]);
-
-  const createRoom = async () => {
-    if (!userName) return;
-    const code = Math.random().toString(36).substring(2, 7).toUpperCase();
-    setRoomCode(code);
-    await set(ref(db, `rooms/${code}`), {
-      code,
-      host: userName,
-      phase: "lobby",
-      playerList: [userName],
-      currentRound: 0,
-      stories: {}
-    });
-    setScreen("lobby");
-  };
-
-  const joinRoom = async () => {
-    const snap = await get(ref(db, `rooms/${roomCode}`));
-    if (snap.exists()) {
-      const data = snap.val();
-      await update(ref(db, `rooms/${roomCode}`), {
-        playerList: [...data.playerList, userName]
-      });
-      setScreen("lobby");
-    }
-  };
-
-  const startGame = async () => {
-    const stories = {};
-    room.playerList.forEach(p => {
-      stories[p] = {
-        prompt: pick(PROMPT_TEMPLATES, 1)[0],
-        details: pick(STORY_DETAILS, 2),
-        segments: []
-      };
-    });
-    await update(ref(db, `rooms/${roomCode}`), { phase: "play", stories });
-  };
-
-  return (
-    <>
-      <style>{CSS}</style>
-      <div className="app">
-        {screen === "home" && (
-          <div className="screen center-screen">
-            <Logo />
-            <Card>
-              <input className="input" placeholder="Your Name" value={userName} onChange={e => setUserName(e.target.value)} />
-              <Btn onClick={createRoom}>Host New Game</Btn>
-              <div className="divider">or</div>
-              <input className="input" placeholder="Room Code" value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} />
-              <Btn variant="secondary" onClick={joinRoom}>Join Game</Btn>
-            </Card>
-          </div>
-        )}
-
-        {screen === "lobby" && room && (
-          <div className="screen">
-            <Logo small />
-            <Card className="room-code-display">
-              <span className="room-code-label">Room Code</span>
-              <span className="room-code-value">{room.code}</span>
-            </Card>
-            <Card>
-              <div className="field-label">Players ({room.playerList.length}/6)</div>
-              {room.playerList.map(p => (
-                <div key={p} className="player-pill"><span className="player-dot" /> {p}</div>
-              ))}
-            </Card>
-            {room.host === userName && (
-              <Btn onClick={startGame} disabled={room.playerList.length < 2}>Start Game</Btn>
-            )}
-            {room.phase === "play" && <Btn onClick={() => setScreen("play")}>Enter Game →</Btn>}
-          </div>
-        )}
-
-        {screen === "play" && room && (
-          <OnlineWritingRound room={room} playerName={userName} />
-        )}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Wonton Writer</title>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Righteous&family=Nunito:wght@400;700;900&display=swap');
         
-        {room?.phase === "reveal" && (
-          <div className="screen">
-             <Logo small />
-             <h2 className="reveal-title">Game Over!</h2>
-             <p>Check the host screen to read your stories aloud!</p>
-             <Btn onClick={() => window.location.reload()}>Back to Home</Btn>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
+        :root { --bg-top: #2e1065; --bg-bottom: #0f172a; --surface: #1e1b4b; --accent: #c084fc; --accent-grad: linear-gradient(135deg, #a855f7, #ec4899); --btn-shadow: #86198f; --text: #f8fafc; --muted: #cbd5e1; --yellow: #fde047; --yellow-shadow: #ca8a04; --radius: 28px; }
+        
+        body { background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%); background-attachment: fixed; color: var(--text); font-family: 'Nunito', sans-serif; margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; display: flex; justify-content: center; }
+        
+        .app { width: 100%; max-width: 450px; padding: 20px; box-sizing: border-box; }
+        .screen { display: none; flex-direction: column; gap: 18px; animation: bounceIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .screen.active { display: flex; }
+        @keyframes bounceIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        
+        /* BUBBLY TEXT LOGO */
+        .logo-container { text-align: center; padding: 10px; margin-bottom: 5px; }
+        .text-logo { font-family: 'Righteous', cursive; font-size: 52px; color: var(--yellow); text-shadow: 0 6px 0 var(--yellow-shadow), 0 15px 25px rgba(0,0,0,0.5); line-height: 0.95; margin: 0; animation: float 3.5s ease-in-out infinite; display: inline-block; letter-spacing: 2px; transform-origin: center; }
+        .text-logo-sub { font-size: 40px; color: var(--accent); text-shadow: 0 5px 0 var(--btn-shadow); display: block; transition: all 0.3s; }
+        @keyframes float { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-12px) rotate(3deg); } }
+        
+        .card { background: var(--surface); border: 4px solid rgba(255, 255, 255, 0.15); border-radius: var(--radius); padding: 24px; box-shadow: 0 12px 24px rgba(0,0,0,0.4); position: relative; }
+        
+        .btn { background: var(--accent-grad); color: white; border: none; border-radius: 50px; padding: 16px 20px; font-family: 'Righteous', cursive; font-size: 20px; letter-spacing: 1px; cursor: pointer; width: 100%; transition: all 0.1s; box-shadow: 0 6px 0 var(--btn-shadow), 0 12px 20px rgba(0,0,0,0.3); text-shadow: 1px 1px 2px rgba(0,0,0,0.3); position: relative; }
+        .btn:active { transform: translateY(6px); box-shadow: 0 0px 0 var(--btn-shadow), 0 4px 10px rgba(0,0,0,0.3); }
+        .btn-ghost { background: transparent; border: 3px solid var(--accent); box-shadow: 0 4px 0 var(--accent), 0 10px 20px rgba(0,0,0,0.2); }
+        .btn-ghost:active { transform: translateY(4px); box-shadow: 0 0px 0 var(--accent), 0 4px 10px rgba(0,0,0,0.2); }
+        .btn-green { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 6px 0 #047857, 0 12px 20px rgba(0,0,0,0.3); }
+        .btn-green:active { transform: translateY(6px); box-shadow: 0 0px 0 #047857, 0 4px 10px rgba(0,0,0,0.3); }
+        
+        .input { background: rgba(0,0,0,0.3); border: 3px solid rgba(255,255,255,0.2); border-radius: 16px; padding: 14px; color: white; font-size: 16px; font-family: 'Nunito', sans-serif; font-weight: 700; width: 100%; box-sizing: border-box; outline: none; transition: border 0.2s; }
+        .input:focus { border-color: var(--accent); }
+        .input::placeholder { color: rgba(255,255,255,0.4); }
+        
+        .timer-badge { background: var(--yellow); padding: 6px 16px; border-radius: 50px; color: #451a03; font-family: 'Righteous'; font-size: 18px; box-shadow: 0 4px 0 var(--yellow-shadow); }
+        
+        .pill { background: rgba(255,255,255,0.1); padding: 14px; border-radius: 16px; margin-bottom: 10px; cursor: pointer; border: 3px solid transparent; transition: 0.2s; font-weight: 700; text-align: center; }
+        .pill.selected { border-color: var(--yellow); background: rgba(253, 224, 71, 0.2); transform: scale(1.02); }
+        .blank-text { color: var(--yellow); font-weight: 900; border-bottom: 3px dashed var(--yellow); text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        
+        .writing-area { background: rgba(0,0,0,0.4); border: 3px solid var(--accent); border-radius: 20px; padding: 18px; color: white; font-size: 18px; font-weight: 700; min-height: 220px; width: 100%; box-sizing: border-box; line-height: 1.6; resize: none; font-family: 'Nunito', sans-serif; outline: none; }
+        .writing-area:focus { border-color: var(--yellow); }
+        
+        .context-label { font-size: 12px; color: var(--accent); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; font-weight: 900; }
+        .tag { background: var(--yellow); color: #451a03; padding: 6px 12px; border-radius: 50px; font-size: 13px; font-weight: 900; box-shadow: 0 2px 0 var(--yellow-shadow); display: inline-block; margin: 0 5px 5px 0;}
+        
+        h2, h3, h4 { font-family: 'Righteous', cursive; margin-top: 0; letter-spacing: 1px; }
+        
+        /* POPUP ANIMATIONS */
+        #toast-popup { display:none; position:fixed; top:40%; left:50%; transform:translate(-50%, -50%) scale(0.5); z-index:9999; background:var(--accent-grad); padding:20px 40px; border-radius:30px; font-family:'Righteous'; font-size:28px; color:white; box-shadow:0 15px 40px rgba(0,0,0,0.6); text-align:center; white-space:nowrap; opacity:0; pointer-events:none; }
+        @keyframes toastAnim { 0% { opacity:0; transform:translate(-50%, -40%) scale(0.5); } 15% { opacity:1; transform:translate(-50%, -50%) scale(1.1); } 30% { transform:translate(-50%, -50%) scale(1); } 80% { opacity:1; transform:translate(-50%, -50%) scale(1); } 100% { opacity:0; transform:translate(-50%, -60%) scale(0.9); } }
+        .toast-active { animation: toastAnim 2.5s forwards; }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  STYLES (Bubbly & Gamey)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Righteous&family=DM+Sans:wght@400;700&display=swap');
+        /* MINIGAME CSS */
+        #minigame-area { position:relative; width:100%; height:200px; background:rgba(0,0,0,0.3); border-radius:20px; border:3px solid var(--accent); overflow:hidden; margin-top:15px; }
+        .mg-target { position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); font-family:'Righteous'; font-size:32px; color:var(--yellow); text-shadow:0 3px 0 var(--yellow-shadow); pointer-events:none; z-index:10; }
+        .mg-bubble { position:absolute; padding:8px 15px; background:rgba(255,255,255,0.1); border:2px solid rgba(255,255,255,0.3); border-radius:30px; font-weight:bold; font-size:14px; cursor:pointer; user-select:none; transition:0.1s; animation: floatBubble 3s ease-in-out infinite alternate; }
+        .mg-bubble:active { transform:scale(0.9); }
+        @keyframes floatBubble { from { transform:translateY(-5px); } to { transform:translateY(5px); } }
 
-:root {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --accent: #8b5cf6;
-  --accent-grad: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
-  --text: #f8fafc;
-  --r: 24px;
-}
+        /* SMOOTH SPRING CAROUSEL ANIMATIONS */
+        @keyframes slideSpringRight { 0% { opacity: 0; transform: translateX(120px) rotate(3deg); } 50% { opacity: 1; transform: translateX(-10px) rotate(-1deg); } 75% { transform: translateX(5px) rotate(0.5deg); } 100% { transform: translateX(0) rotate(0); } }
+        @keyframes slideSpringLeft { 0% { opacity: 0; transform: translateX(-120px) rotate(-3deg); } 50% { opacity: 1; transform: translateX(10px) rotate(1deg); } 75% { transform: translateX(-5px) rotate(-0.5deg); } 100% { transform: translateX(0) rotate(0); } }
+        @keyframes popSpringCenter { 0% { opacity: 0; transform: scale(0.8) translateY(30px); } 50% { opacity: 1; transform: scale(1.05) translateY(-10px); } 75% { transform: scale(0.98) translateY(5px); } 100% { transform: scale(1) translateY(0); } }
+        
+        .slide-right { animation: slideSpringRight 0.6s ease-out forwards; }
+        .slide-left { animation: slideSpringLeft 0.6s ease-out forwards; }
+        .slide-center { animation: popSpringCenter 0.6s ease-out forwards; }
 
-body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; }
-.app { display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-.screen { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 20px; animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-.center-screen { justify-content: center; min-height: 80vh; }
+        /* OBSCURED SEGMENTS */
+        .segment-card { position: relative; margin-bottom: 12px; }
+        .segment-content { background: rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 15px; font-size: 18px; white-space: pre-wrap; transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .segment-content.obscured { filter: blur(6px); opacity: 0.4; transform: scale(0.95); pointer-events: none; }
+        .segment-overlay { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; cursor: pointer; z-index: 2; border-radius: 12px; transition: opacity 0.3s; }
+        .segment-overlay:hover .badge { transform: scale(1.05); }
+        .segment-overlay .badge { background: var(--accent); padding: 8px 18px; border-radius: 20px; font-family: 'Righteous'; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.5); transition: 0.2s; font-size: 14px; letter-spacing: 1px; }
 
-@keyframes pop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        /* DEV TOOLS */
+        #dev-tools { display:none; position:fixed; bottom:15px; right:15px; background:rgba(0,0,0,0.85); padding:15px; border-radius:20px; border:3px solid #10b981; z-index:999; text-align:center; }
+    </style>
+</head>
+<body onclick="initAudio()">
+    <div id="toast-popup"></div>
 
-.logo-inner { 
-  background: var(--surface); border: 4px solid var(--accent); 
-  border-radius: var(--r); padding: 20px; text-align: center;
-  box-shadow: 0 10px 0 var(--accent);
-}
-.logo-word { font-family: 'Righteous'; font-size: 32px; color: #fff; }
+    <div class="app">
+        <div class="logo-container">
+            <h1 class="text-logo">WONTON<br><span class="text-logo-sub">WRITER</span></h1>
+        </div>
 
-.card { 
-  background: var(--surface); border-radius: var(--r); padding: 24px; 
-  box-shadow: 0 8px 24px rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);
-}
+        <div id="screen-home" class="screen active">
+            <div class="card">
+                <input id="input-name" class="input" placeholder="Enter Your Name..." style="margin-bottom: 12px; text-align: center;">
+                <button class="btn" onclick="createLobby()">HOST ONLINE GAME</button>
+                <div style="text-align:center; margin:16px; color:var(--muted); font-weight:bold;">— OR —</div>
+                <input id="input-code" class="input" placeholder="Enter 5-Letter Code..." style="margin-bottom: 12px; text-align: center;">
+                <button class="btn btn-ghost" onclick="joinLobby()">JOIN PRIVATE GAME</button>
+                <div style="text-align:center; margin:16px; color:var(--muted); font-weight:bold;">— OR —</div>
+                <button class="btn btn-green" onclick="startLocalMode()">SAME DEVICE MODE</button>
+            </div>
+        </div>
 
-.btn { 
-  background: var(--accent-grad); color: #fff; border: none; 
-  border-radius: 16px; padding: 16px; font-family: 'Righteous'; 
-  font-size: 18px; cursor: pointer; transition: 0.2s;
-}
-.btn:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(139, 92, 246, 0.4); }
-.btn-secondary { background: #334155; }
+        <div id="screen-lobby" class="screen">
+            <div class="card" style="text-align:center">
+                <div style="font-size:13px; color:var(--muted); font-weight: 900; letter-spacing: 2px;">ROOM CODE</div>
+                <div id="display-code" style="font-size:52px; font-family:'Righteous'; color:var(--yellow); text-shadow: 0 4px 0 var(--yellow-shadow);">-----</div>
+            </div>
+            
+            <div class="card" id="host-settings" style="display:none; padding:15px;">
+                <h4 style="margin-bottom:10px;">Host Settings</h4>
+                
+                <label style="font-size:12px; font-weight: 700; color:var(--accent);">Game Mode:</label>
+                <select id="setting-mode" class="input" style="margin: 5px 0 15px 0; padding:10px;">
+                    <option value="classic" selected>Classic (Crowdsourced)</option>
+                    <option value="direct">Direct Custom (Write your own starter)</option>
+                </select>
 
-.input { 
-  background: #0f172a; border: 2px solid #334155; border-radius: 12px; 
-  padding: 12px; color: #fff; font-size: 16px; margin-bottom: 10px; width: 100%;
-}
+                <label style="font-size:12px; font-weight: 700; color:var(--accent);">Details per story:</label>
+                <select id="setting-details" class="input" style="margin: 5px 0 15px 0; padding:10px;">
+                    <option value="0">0 Details</option>
+                    <option value="1">Exactly 1 Detail</option>
+                    <option value="2">Exactly 2 Details</option>
+                    <option value="upto2" selected>Up to 2 Details (0-2)</option>
+                </select>
 
-.room-code-value { font-family: 'Righteous'; font-size: 48px; color: #a855f7; display: block; text-align: center; }
+                <div style="display:flex; gap:10px; margin-bottom:15px;">
+                    <div style="flex:1">
+                        <label style="font-size:12px; font-weight: 700; color:var(--accent);">Gen Timer:</label>
+                        <select id="setting-gen-timer" class="input" style="margin-top: 5px; padding:10px;" onchange="toggleCustom('setting-gen-timer')">
+                            <option value="3" selected>3 Mins</option>
+                            <option value="5">5 Mins</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                        <div id="setting-gen-timer-custom-wrap" style="display:none; gap:5px; margin-top:5px; align-items:center;">
+                            <input type="number" id="custom-gen-val" class="input" style="width:70px; padding:8px;" value="4" min="1"> <span style="font-size:11px;">Mins</span>
+                        </div>
+                    </div>
+                    <div style="flex:1">
+                        <label style="font-size:12px; font-weight: 700; color:var(--accent);">Sel Timer:</label>
+                        <select id="setting-sel-timer" class="input" style="margin-top: 5px; padding:10px;" onchange="toggleCustom('setting-sel-timer')">
+                            <option value="1" selected>1 Min</option>
+                            <option value="2">2 Mins</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                        <div id="setting-sel-timer-custom-wrap" style="display:none; gap:5px; margin-top:5px; align-items:center;">
+                            <input type="number" id="custom-sel-val" class="input" style="width:70px; padding:8px;" value="3" min="1"> <span style="font-size:11px;">Mins</span>
+                        </div>
+                    </div>
+                </div>
 
-.writing-area {
-  background: #0f172a; border: 2px solid var(--accent); border-radius: var(--r);
-  padding: 20px; color: #fff; font-size: 18px; min-height: 250px; outline: none;
-}
+                <label style="font-size:12px; font-weight: 700; color:var(--accent);">Play Timer:</label>
+                <select id="setting-play-timer" class="input" style="margin-top: 5px; padding:10px;" onchange="toggleCustom('setting-play-timer')">
+                    <option value="auto" selected>Auto (Based on Players)</option>
+                    <option value="speed">5 Minute Speed Round</option>
+                    <option value="10">10 Minutes</option>
+                    <option value="15">15 Minutes</option>
+                    <option value="30">30 Minutes</option>
+                    <option value="custom">Custom...</option>
+                </select>
+                <div id="setting-play-timer-custom-wrap" style="display:none; gap:10px; margin-top:5px; align-items:center;">
+                    <input type="number" id="custom-play-val" class="input" style="width:90px;" value="12" min="1"> <span style="font-size:14px; font-weight:bold;">Mins</span>
+                </div>
+            </div>
 
-.tag { background: #fbbf2422; border: 1px solid #fbbf24; color: #fbbf24; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
-.divider { text-align: center; margin: 10px; opacity: 0.5; }
-`;
-  </script>
+            <div class="card">
+                <h3 id="player-count">Players (0)</h3>
+                <div id="player-list"></div>
+            </div>
+            <button id="start-btn" class="btn btn-green" style="display:none" onclick="startSetupPhase()">START GAME</button>
+            <button class="btn btn-ghost" style="border-color:#ef4444; color:#ef4444; margin-top:10px;" onclick="leaveLobby()">LEAVE LOBBY</button>
+        </div>
+
+        <div id="screen-gen" class="screen">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+                <h2 id="gen-label" style="color:var(--yellow); text-shadow: 0 3px 0 var(--yellow-shadow); margin:0;">PROMPT 1/3</h2>
+                <div id="gen-timer" class="timer-badge">03:00</div>
+            </div>
+            <div class="card">
+                <p id="gen-instruction" style="margin-top:0; font-weight:900; color:var(--accent);">Fill in the blank:</p>
+                <div id="gen-template" style="font-size:20px; line-height:1.6; margin-bottom:20px; font-weight: 700;"></div>
+                <input id="gen-input" class="input" placeholder="Type your answer...">
+                <div style="margin:20px 0; text-align:center; color:var(--muted); font-size:13px; font-weight:900;">— OR WRITE FULL PROMPT —</div>
+                <textarea id="gen-custom" class="input" style="height:80px" placeholder="Write a completely custom prompt..."></textarea>
+            </div>
+            <button class="btn" onclick="submitGen(false)">NEXT →</button>
+        </div>
+
+        <div id="screen-direct" class="screen">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+                <h2 style="color:var(--yellow); text-shadow: 0 3px 0 var(--yellow-shadow); margin:0;">YOUR START</h2>
+                <div id="direct-timer" class="timer-badge">05:00</div>
+            </div>
+            <div class="card">
+                <p style="margin-top:0; font-weight:900; color:var(--accent);">Write your starting prompt:</p>
+                <textarea id="direct-prompt" class="input" style="height:100px" placeholder="A mysterious detective..."></textarea>
+                
+                <div id="direct-details-box" style="margin-top:20px; border-top:2px dashed rgba(255,255,255,0.1); padding-top:15px;">
+                    <p style="margin-top:0; font-weight:900; color:var(--accent);">Add or Send Details:</p>
+                    <input id="direct-detail-input" class="input" placeholder="e.g. A blue feather...">
+                    
+                    <div style="display:flex; gap:8px; margin-top:10px;">
+                        <button class="btn btn-ghost" style="padding:10px; font-size:14px; flex:1;" onclick="addMyDirectDetail()">➕ ADD MINE</button>
+                        <button class="btn btn-ghost" style="padding:10px; font-size:14px; flex:1; border-color:#ec4899; color:#ec4899;" onclick="sendDirectDetail()">🎁 SEND RANDOM</button>
+                    </div>
+                    
+                    <div style="margin-top:15px; font-size:12px; font-weight:bold; color:var(--muted);">MY DETAILS (<span id="my-det-count">0</span>/<span id="my-det-max">2</span>):</div>
+                    <div id="my-direct-details" style="display:flex; gap:5px; flex-wrap:wrap; min-height:40px; background:rgba(0,0,0,0.2); padding:10px; border-radius:12px; margin-top:5px;"></div>
+                    
+                    <div style="margin-top:10px; font-size:12px; font-weight:bold; color:var(--muted);">RECEIVED (TAP TO ADD):</div>
+                    <div id="received-direct-details" style="display:flex; gap:5px; flex-wrap:wrap; min-height:40px; background:rgba(0,0,0,0.2); padding:10px; border-radius:12px; margin-top:5px;"></div>
+                </div>
+            </div>
+            <button class="btn btn-green" onclick="submitDirect()">LOCK IN STARTER</button>
+        </div>
+
+        <div id="screen-select" class="screen">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+                <h2 style="color:var(--yellow); text-shadow: 0 3px 0 var(--yellow-shadow); margin:0;">PICK STORY</h2>
+                <div id="select-timer" class="timer-badge">01:00</div>
+            </div>
+            <div class="card">
+                <p style="margin-top:0; font-size:15px; font-weight: 900; color:var(--accent);">Choose 1 Starting Prompt:</p>
+                <div id="select-prompts"></div>
+            </div>
+            <div class="card" id="select-details-card">
+                <p style="margin-top:0; font-size:15px; font-weight: 900; color:var(--accent);" id="select-detail-label">Choose Details:</p>
+                <div id="select-details"></div>
+            </div>
+            <button class="btn btn-green" onclick="confirmSelection()">LOCK IT IN</button>
+        </div>
+
+        <div id="screen-play" class="screen">
+             <div style="display:flex; justify-content:space-between; align-items:center">
+                <h2 id="round-label" style="color:var(--yellow); text-shadow: 0 3px 0 var(--yellow-shadow); margin:0;">ROUND 1 / 6</h2>
+                <div style="display:flex; gap:10px;">
+                    <div id="play-counter" class="timer-badge" style="background:var(--accent); color:white;">0/0 Done</div>
+                    <div id="play-timer" class="timer-badge">10:00</div>
+                </div>
+            </div>
+            <div class="card" style="padding:15px; border-color:var(--yellow); background:rgba(253, 224, 71, 0.1);">
+                <div class="context-label">Original Prompt:</div>
+                <div id="play-orig-prompt" style="font-style:italic; font-size:16px; font-weight: 700;"></div>
+                <div id="play-details-container" style="margin-top:10px;"></div>
+            </div>
+            <div class="card" id="prev-segment-card" style="padding:15px; border-color:var(--accent); background:rgba(192, 132, 252, 0.1);">
+                <div class="context-label">Previous Segment:</div>
+                <div id="play-prev-segment" style="font-style:italic; font-size:16px; font-weight: 700;"></div>
+            </div>
+            <textarea id="writing-area" class="writing-area" placeholder="Continue the story here..."></textarea>
+            <button class="btn" onclick="submitWriting()">SUBMIT PART</button>
+        </div>
+
+        <div id="screen-wait" class="screen">
+            <div class="card" style="text-align:center; padding:30px 20px;">
+                <div style="display:flex; justify-content:space-between; width:100%; margin-bottom:15px;">
+                    <div id="wait-counter" style="font-family:'Righteous'; color:var(--accent);">0 / 0 Done</div>
+                    <div id="wait-timer-display" style="font-family:'Righteous'; color:var(--yellow);">--:--</div>
+                </div>
+                <h2 style="color:var(--yellow); text-shadow: 0 3px 0 var(--yellow-shadow); margin-bottom:5px;">Waiting...</h2>
+                <p id="wait-tooltip" style="font-weight: 700; color: var(--muted); font-size:14px; min-height:40px;">Pro-tip: Kill off a main character.</p>
+                
+                <div id="minigame-area">
+                    <div id="mg-target" class="mg-target">WORD</div>
+                    <div id="mg-over" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:20; flex-direction:column; justify-content:center; align-items:center;">
+                        <h3 id="mg-over-msg" style="color:red; margin:0;">STRIKE 3!</h3>
+                        <button class="btn-ghost" style="padding:5px 15px; font-size:14px; margin-top:10px; color:white; border-color:white;" onclick="startMinigame()">Retry</button>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:bold; margin-top:10px; color:var(--muted);">
+                    <span id="mg-time" style="color:var(--yellow);">⏳ 60s</span>
+                    <span id="mg-score">Score: 0</span>
+                    <span id="mg-high">High: 0</span>
+                    <span id="mg-strikes" style="color:red;">❌ 0/3</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="screen-title" class="screen">
+             <div style="display:flex; justify-content:space-between; align-items:center">
+                <h2 style="color:var(--yellow); text-shadow: 0 3px 0 var(--yellow-shadow); margin:0;">NAME IT!</h2>
+                <div id="title-timer" class="timer-badge">00:30</div>
+            </div>
+            <div class="card">
+                <p style="margin-top:0; font-weight:900; color:var(--accent);">Your story has returned to you. Give it a title:</p>
+                <input id="title-input" class="input" style="font-size:22px; text-align:center; font-family:'Righteous';" placeholder="The Epic Tale of...">
+                <hr style="border:0; border-top:3px solid rgba(255,255,255,0.1); margin:20px 0;">
+                <div id="title-story-preview" style="max-height:200px; overflow-y:auto; font-size:14px; color:var(--muted); white-space:pre-wrap;"></div>
+            </div>
+            <button class="btn btn-green" onclick="submitTitle()">PUBLISH TITLE</button>
+        </div>
+
+        <div id="screen-reveal" class="screen">
+            <h2 style="color:var(--yellow); text-align:center; text-shadow: 0 4px 0 var(--yellow-shadow); font-size: 36px; margin-top:0;">THE STORIES</h2>
+            <div id="stories-output"></div>
+            
+            <div id="reveal-controls" style="display:flex; justify-content:center; align-items:stretch; gap: 8px;">
+                <button id="btn-prev" class="btn btn-ghost" style="width:60px; padding: 10px; font-size:22px;" onclick="prevStory()">◀</button>
+                <button id="btn-reveal-part" class="btn btn-green" style="flex:1; padding: 10px; font-size: 16px;" onclick="revealNextPart()">✨ REVEAL PART</button>
+                <button id="btn-save" class="btn btn-green" style="flex:1; padding: 10px; font-size: 16px; display:none;" onclick="downloadCurrentStory()">💾 SAVE TXT</button>
+                <button id="btn-uturn" class="btn btn-ghost" style="width:60px; padding: 10px; font-size:22px;" onclick="returnToMyStory()">↩️</button>
+                <button id="btn-next" class="btn btn-ghost" style="width:60px; padding: 10px; font-size:22px;" onclick="nextStory()">▶</button>
+            </div>
+            <button class="btn btn-ghost" style="margin-top:10px" onclick="leaveLobby()">BACK TO MENU</button>
+        </div>
+
+        <div id="screen-local-setup" class="screen">
+            <h2 style="color:var(--yellow); text-align:center; text-shadow: 0 3px 0 var(--yellow-shadow);">SAME DEVICE MODE</h2>
+            <div class="card">
+                <p style="margin-top:0; font-weight: 700;">Add Players (2-6):</p>
+                <div id="local-player-list" style="margin-bottom:12px"></div>
+                <div style="display:flex; gap:10px;">
+                    <input id="local-new-player" class="input" placeholder="Player Name...">
+                    <button class="btn" style="width:auto; padding:12px 24px;" onclick="addLocalPlayer()">+</button>
+                </div>
+                <hr style="border:0; border-top:3px solid rgba(255,255,255,0.1); margin:20px 0;">
+                
+                <label style="font-size:14px; font-weight: 700; color:var(--accent);">Custom Prompt (Optional):</label>
+                <input id="local-custom-prompt" class="input" placeholder="e.g. A mysterious detective..." style="margin-top: 5px; margin-bottom: 15px;">
+
+                <label style="font-size:14px; font-weight: 700; color:var(--accent);">Details per story:</label>
+                <select id="local-setting-details" class="input" style="margin-top: 8px; margin-bottom: 15px;">
+                    <option value="0">0 Details</option>
+                    <option value="1">Exactly 1 Detail</option>
+                    <option value="2">Exactly 2 Details</option>
+                    <option value="upto2" selected>Up to 2 Details (0-2)</option>
+                </select>
+
+                <label style="font-size:14px; font-weight: 700; color:var(--accent);">Round Timer:</label>
+                <select id="local-setting-timer" class="input" style="margin-top: 8px;" onchange="toggleCustom('local-setting-timer')">
+                    <option value="auto" selected>Auto (10 Minutes)</option>
+                    <option value="speed">5 Minute Speed Round</option>
+                    <option value="10">10 Minutes</option>
+                    <option value="15">15 Minutes</option>
+                    <option value="20">20 Minutes</option>
+                    <option value="30">30 Minutes</option>
+                    <option value="custom">Custom...</option>
+                </select>
+                <div id="local-setting-timer-custom-wrap" style="display:none; gap:10px; margin-top:5px; align-items:center;">
+                    <input type="number" id="local-custom-play-val" class="input" style="width:90px;" value="12" min="1"> <span style="font-size:14px; font-weight:bold;">Mins</span>
+                </div>
+            </div>
+            <button class="btn btn-green" onclick="startLocalSelection()">START LOCAL GAME</button>
+            <button class="btn btn-ghost" style="border-color:#ef4444; color:#ef4444; margin-top:5px;" onclick="leaveLobby()">BACK</button>
+        </div>
+
+        <div id="screen-handoff" class="screen">
+            <div class="card" style="text-align:center; padding:60px 20px">
+                <div class="emoji-pulse">👋</div>
+                <h2>Pass the phone to</h2>
+                <h1 id="handoff-name" style="color:var(--yellow); font-size:44px; margin:0; text-shadow: 0 4px 0 var(--yellow-shadow);">---</h1>
+                <p style="color:var(--muted); font-size:16px; margin-top:20px; font-weight: 700;">No peeking allowed!</p>
+            </div>
+            <button class="btn btn-green" onclick="acceptHandoff()">I'M READY →</button>
+        </div>
+
+        <div id="dev-tools">
+            <span style="color:#10b981; font-family:'Righteous'; font-size:14px;">DEVTEST</span><br>
+            <button class="btn btn-green" style="padding:5px 10px; font-size:12px; margin-top:5px;" onclick="runBotActions()">FORCE BOTS</button>
+        </div>
+    </div>
+
+    <script>
+        /* =====================================================================
+           1. CONFIG & FIREBASE SETUP
+           ===================================================================== */
+        const config = { apiKey: "AIzaSyAVWJivcsDjX3eY4_QN7SA3LUrzHmv7m8U", authDomain: "wonton-writer.firebaseapp.com", databaseURL: "https://wonton-writer-default-rtdb.firebaseio.com", projectId: "wonton-writer" };
+        firebase.initializeApp(config);
+        const db = firebase.database();
+
+        /* =====================================================================
+           2. GAME DATA (Fallback Data if GitHub fails to load)
+           ===================================================================== */
+        let GAME_DATA = {
+            prompts: [
+                "A detective discovers the victim was actually their ___.",
+                "The safe was finally cracked open, but inside was only a single ___.",
+                "The ransom note demanded one million dollars and a ___.",
+                "They said the basement was empty, but I hear ___ down there.",
+                "I hired a private investigator to follow my spouse, but they found ___ instead.",
+                "The police arrived at the crime scene, only to find a ___.",
+                "Every time I sneeze, I travel ___ minutes into the future.",
+                "My robot butler started acting weird when it saw the ___."
+            ],
+            safetyPrompts: [
+                "The lights flickered, and when they came back on, the front door had vanished.",
+                "The stray cat jumped onto the table and spoke to me.",
+                "I looked into the mirror, but my reflection was staring at the ceiling."
+            ],
+            details: [
+                "raw chicken", "butt stuff", "explosive diarrhea", "a wet fart", "an awkwardly timed boner", 
+                "a suspiciously sticky sock", "a politely menacing stray cat", "a grandfather clock that ticks backward"
+            ],
+            tooltips: [
+                "Pro-tip: Kill off a main character.",
+                "Did you know? The longest novel ever written is over 13,000 pages.",
+                "Pro-tip: Introduce a sudden explosion.",
+                "Reminder: Don't forget your details!",
+                "Pro-tip: Make it deeply uncomfortable."
+            ],
+            wordGroups: [ 
+                ["POP", "PEP", "PAP", "PUP", "PIE", "POT", "PAN", "PIN"], 
+                ["CAT", "BAT", "COT", "CUT", "CAR", "CAP", "CAN", "CAB"], 
+                ["DOG", "LOG", "BOG", "DIG", "DOT", "DON", "DUG", "FOG"], 
+                ["RUN", "RAN", "BUN", "SUN", "FUN", "RUG", "RUB", "RUM"], 
+                ["HOT", "HAT", "HUT", "HIT", "HOP", "HOW", "HOG", "LOT"], 
+                ["FUN", "FAN", "FIN", "BUN", "SUN", "PUN", "FUR", "FAR"] 
+            ]
+        };
+
+        /* =====================================================================
+           3. GLOBAL STATE VARIABLES
+           ===================================================================== */
+        let myName = "", roomCode = "", room = null;
+        let timerInt = null, waitTimerInt = null, tooltipInt = null;
+        let isLocalGame = false, localPlayers = [], localStory = null, localRound = 0, localPhaseEndTime = 0, localTimerOverride = 'auto';
+        let genStep = 1, genFinished = false, mySelections = { prompt: "", details: [] };
+        let revealStories = [], revealIndex = 0, revealedCounts = {};
+        let isDevMode = false, bots = ["Bot 1", "Bot 2", "Bot 3"];
+        let myDirectDetailsList = [], maxDirectDet = 2, sendDetailIndex = 0;
+        let isDataLive = false; // Tracks if GitHub data loaded successfully
+
+        /* =====================================================================
+           4. AUDIO ENGINE
+           ===================================================================== */
+        let audioCtx;
+        function initAudio() { try { if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+        function playSfx(type) {
+            if(!audioCtx || audioCtx.state === 'suspended') return;
+            try {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                
+                if(type === 'turn') { osc.type = 'sine'; osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); gain.gain.setValueAtTime(0.5, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5); osc.start(); osc.stop(audioCtx.currentTime + 0.5); } 
+                else if (type === 'tick') { osc.type = 'square'; osc.frequency.setValueAtTime(150, audioCtx.currentTime); gain.gain.setValueAtTime(0.1, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05); osc.start(); osc.stop(audioCtx.currentTime + 0.05); } 
+                else if (type === 'pop') { osc.type = 'sine'; osc.frequency.setValueAtTime(800, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1); gain.gain.setValueAtTime(0.3, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); osc.start(); osc.stop(audioCtx.currentTime + 0.1); } 
+                else if (type === 'buzz') { osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, audioCtx.currentTime); gain.gain.setValueAtTime(0.3, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); osc.start(); osc.stop(audioCtx.currentTime + 0.2); }
+            } catch(e){}
+        }
+
+        /* =====================================================================
+           5. UTILITY FUNCTIONS & INITIALIZATION
+           ===================================================================== */
+        window.onload = async () => {
+            const savedName = localStorage.getItem('wontonName');
+            const savedCode = localStorage.getItem('wontonCode');
+            if(savedName) document.getElementById('input-name').value = savedName;
+            if(savedCode) document.getElementById('input-code').value = savedCode;
+
+            // Fetch live data from GitHub
+            try {
+                const response = await fetch('https://raw.githubusercontent.com/NosracTN2/Wonton-writer/main/data.json', { cache: "no-store" });
+                if (response.ok) {
+                    const fetchedData = await response.json();
+                    GAME_DATA = { ...GAME_DATA, ...fetchedData };
+                    isDataLive = true;
+                    console.log("Successfully loaded game data from GitHub.");
+                } else {
+                    console.warn("GitHub file found, but response was not OK.");
+                }
+            } catch (error) {
+                console.error("Failed to load GitHub repo data. Using local fallback.", error);
+            }
+        };
+
+        function shuffleArray(array) {
+            let currentIndex = array.length, randomIndex;
+            while (currentIndex != 0) {
+                randomIndex = Math.floor(Math.random() * currentIndex); currentIndex--;
+                [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+            }
+            return array;
+        }
+
+        function toggleCustom(id) {
+            const val = document.getElementById(id).value;
+            document.getElementById(id + '-custom-wrap').style.display = (val === 'custom') ? 'flex' : 'none';
+        }
+
+        function getCustomTimerValue(selectId, customInputId) {
+            const sel = document.getElementById(selectId).value;
+            return sel === 'custom' ? (parseInt(document.getElementById(customInputId).value) || 10) : sel; 
+        }
+
+        /* =====================================================================
+           6. UI CONTROLS & TIMERS
+           ===================================================================== */
+        function showPopup(msg) {
+            const p = document.getElementById('toast-popup');
+            p.innerText = msg; p.style.display = 'block'; p.classList.remove('toast-active');
+            void p.offsetWidth; p.classList.add('toast-active'); playSfx('turn');
+        }
+
+        function show(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById('screen-' + id).classList.add('active');
+            window.scrollTo(0,0);
+            
+            if(id === 'wait') { document.getElementById('wait-counter').innerText = getWaitCount(); mgActive = true; startWaitScreenTools(); } 
+            else { if(tooltipInt) clearInterval(tooltipInt); mgActive = false; }
+        }
+
+        function startSyncTimer(endTimeMs, elId, onEnd) {
+            if(timerInt) clearInterval(timerInt);
+            timerInt = setInterval(() => {
+                let t = Math.max(0, Math.round((endTimeMs - Date.now()) / 1000));
+                let m = Math.floor(t/60), s = t%60;
+                let el = document.getElementById(elId);
+                if(el) el.innerText = `${m}:${s<10?'0':''}${s}`;
+                if(t <= 10 && t > 0) playSfx('tick'); 
+                if(t <= 0) { clearInterval(timerInt); timerInt = null; if(onEnd) onEnd(); }
+            }, 1000);
+        }
+
+        function getPlayTime(playerCount, roundNum) {
+            let mode = isLocalGame ? localTimerOverride : (room ? room.playTimerMode : 'auto');
+            if (mode === 'speed') return 5 * 60; 
+            if (isLocalGame && mode === 'auto') return 10 * 60;
+            if (mode !== 'auto' && mode) return parseInt(mode) * 60;
+            
+            let baseTimer = 10 * 60;
+            if (playerCount === 2) baseTimer = 30 * 60;
+            else if (playerCount === 3) baseTimer = 20 * 60;
+            else if (playerCount === 4) baseTimer = 15 * 60;
+            else if (playerCount === 5) baseTimer = roundNum === 0 ? 20 * 60 : 10 * 60;
+            return baseTimer;
+        }
+
+        /* =====================================================================
+           7. LOBBY & FIREBASE NETWORKING
+           ===================================================================== */
+        async function createLobby() {
+            initAudio(); myName = document.getElementById('input-name').value.trim();
+            if(!myName) return alert("Please enter a name!");
+            localStorage.setItem('wontonName', myName); 
+            roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+            await db.ref('rooms/'+roomCode).set({ code: roomCode, host: myName, players: [myName], phase: 'lobby', currentRound: 0 });
+            document.getElementById('host-settings').style.display = 'block';
+            initListener(); show('lobby');
+        }
+
+        async function joinLobby() {
+            initAudio(); myName = document.getElementById('input-name').value.trim(); roomCode = document.getElementById('input-code').value.toUpperCase();
+            if(roomCode === "DEVTEST") return initDevMode();
+            if(!myName || !roomCode) return alert("Name and Code required!");
+            localStorage.setItem('wontonName', myName); localStorage.setItem('wontonCode', roomCode); 
+
+            const s = await db.ref('rooms/'+roomCode).get();
+            if(!s.exists()) return alert("Room not found!");
+            let p = s.val().players || []; 
+            if(!p.includes(myName)) { p.push(myName); await db.ref('rooms/'+roomCode).update({ players: p }); }
+            initListener(); show('lobby');
+        }
+
+        async function leaveLobby() {
+            if (roomCode && myName && !isLocalGame) {
+                if (room && room.players) {
+                    const newP = room.players.filter(p => p !== myName);
+                    if (newP.length === 0) await db.ref('rooms/'+roomCode).remove(); 
+                    else await db.ref('rooms/'+roomCode).update({players: newP}); 
+                }
+                db.ref('rooms/'+roomCode).off();
+            }
+            location.reload(); 
+        }
+
+        async function kickPlayer(targetName) {
+            if (confirm(`Kick ${targetName} from the lobby?`)) {
+                let p = room.players.filter(name => name !== targetName);
+                await db.ref('rooms/'+roomCode).update({ players: p });
+            }
+        }
+
+        /* =====================================================================
+           8. MASTER STATE LISTENER (The Phase Router)
+           ===================================================================== */
+        function initListener() {
+            db.ref('rooms/'+roomCode).on('value', snap => {
+                room = snap.val(); if(!room) return;
+                
+                // --- KICK CHECK ---
+                if (!isLocalGame && room.phase === 'lobby' && !room.players.includes(myName)) {
+                    db.ref('rooms/'+roomCode).off();
+                    alert("You have been kicked by the host.");
+                    location.reload();
+                    return;
+                }
+
+                // Update UI elements that persist across states
+                if(document.getElementById('screen-wait').classList.contains('active')) document.getElementById('wait-counter').innerText = getWaitCount();
+                document.getElementById('display-code').innerText = room.code;
+                document.getElementById('player-count').innerText = `Players (${room.players.length})`;
+                
+                const isHost = room.host === myName;
+                document.getElementById('player-list').innerHTML = room.players.map(p => {
+                    const isDone = (room.phase === 'play' && room.ready && room.ready[p] === room.currentRound) || (room.phase === 'title' && room.titlesDone && room.titlesDone[p]);
+                    const kickBtn = (isHost && p !== myName && room.phase === 'lobby') ? `<button class="btn-ghost" style="border:none; color:#ef4444; padding:0 10px; font-size:14px; margin-left:10px;" onclick="kickPlayer('${p}')">✖</button>` : '';
+                    return `<div class="pill" style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="display:flex; align-items:center;">${p} ${kickBtn}</span>
+                                ${isDone ? '<div style="width:14px; height:14px; background:#10b981; border-radius:50%; box-shadow:0 0 10px #10b981;"></div>' : ''}
+                            </div>`;
+                }).join('');
+                
+                document.getElementById('start-btn').style.display = (room.host === myName) ? 'block' : 'none';
+                
+                // --- PHASE ROUTER ---
+                switch(room.phase) {
+                    case 'gen':
+                        if(!genFinished && !document.getElementById('screen-gen').classList.contains('active')) startGenUI();
+                        break;
+                    case 'direct':
+                        if(!genFinished && !document.getElementById('screen-direct').classList.contains('active')) startDirectUI();
+                        if (document.getElementById('screen-direct').classList.contains('active')) {
+                            const rec = room.sentDetails ? room.sentDetails[myName] : null;
+                            let html = "";
+                            if(rec) Object.values(rec).forEach(val => html += `<span class="tag" style="background:var(--accent); color:white; cursor:pointer;" onclick="addMyDirectDetail('${val.replace(/'/g,"\\'")}')">${val} ➕</span>`);
+                            document.getElementById('received-direct-details').innerHTML = html || "<i style='color:var(--muted)'>Nothing yet...</i>";
+                        }
+                        break;
+                    case 'select':
+                        if(!room.selectDone?.[myName] && !document.getElementById('screen-select').classList.contains('active')) startSelectUI();
+                        break;
+                    case 'play':
+                        let rCount = room.ready ? Object.values(room.ready).filter(v => v === room.currentRound).length : 0;
+                        document.getElementById('play-counter').innerText = `${rCount}/${room.players.length} Done`;
+                        if(room.ready?.[myName] !== room.currentRound && !document.getElementById('screen-play').classList.contains('active')) startPlayUI();
+                        break;
+                    case 'title':
+                        if(!room.titlesDone?.[myName] && !document.getElementById('screen-title').classList.contains('active')) startTitleUI();
+                        break;
+                    case 'reveal':
+                        if(!document.getElementById('screen-reveal').classList.contains('active')) showReveal();
+                        break;
+                }
+
+                // --- HOST PROGRESSION CHECKS ---
+                if(room.host === myName && !window.advancingPhase) checkHostProgression();
+            });
+        }
+
+        function checkHostProgression() {
+            let advanceTo = null, payload = {};
+            const numPlayers = room.players.length;
+
+            if (room.phase === 'gen') {
+                const pCount = Math.floor(Object.keys(room.pool?.prompts || {}).length / 3);
+                const dCount = Math.floor(Object.keys(room.pool?.details || {}).length / 3);
+                if (room.detailsPerStory === '0' ? (pCount >= numPlayers) : (pCount >= numPlayers && dCount >= numPlayers)) {
+                    advanceTo = 'select'; payload = { phaseEndTime: Date.now() + (room.selTimerSet || 1) * 60000 };
+                }
+            } else if (['select', 'direct'].includes(room.phase)) {
+                if (Object.keys(room.selectDone || {}).length === numPlayers) {
+                    advanceTo = 'play'; payload = { ready: null, phaseEndTime: Date.now() + getPlayTime(numPlayers, 0) * 1000 };
+                }
+            } else if (room.phase === 'play') {
+                if (Object.values(room.ready || {}).filter(v => v === room.currentRound).length === numPlayers) {
+                    if (room.currentRound + 1 < numPlayers) {
+                        advanceTo = 'play'; payload = { currentRound: room.currentRound + 1, ready: null, phaseEndTime: Date.now() + getPlayTime(numPlayers, room.currentRound + 1) * 1000 };
+                    } else { 
+                        advanceTo = 'title'; payload = { phaseEndTime: Date.now() + 30000 };
+                    }
+                }
+            } else if (room.phase === 'title') {
+                if (Object.keys(room.titlesDone || {}).length === numPlayers) advanceTo = 'reveal';
+            }
+
+            if (advanceTo) {
+                window.advancingPhase = true;
+                db.ref(`rooms/${roomCode}`).update({ phase: advanceTo, ...payload }).then(() => window.advancingPhase = false);
+            }
+        }
+
+        /* =====================================================================
+           9. PHASE SETUP & LOGIC
+           ===================================================================== */
+        async function startSetupPhase() {
+            const mode = document.getElementById('setting-mode').value;
+            const detCount = document.getElementById('setting-details').value; 
+            const genT = getCustomTimerValue('setting-gen-timer', 'custom-gen-val');
+            const selT = getCustomTimerValue('setting-sel-timer', 'custom-sel-val');
+            const playT = getCustomTimerValue('setting-play-timer', 'custom-play-val'); 
+            
+            if(mode === 'direct') {
+                await db.ref(`rooms/${roomCode}`).update({ phase: 'direct', detailsPerStory: detCount, playTimerMode: playT, phaseEndTime: Date.now() + genT * 60000 });
+            } else {
+                let shuffled = shuffleArray([...GAME_DATA.prompts]);
+                let assigned = {}; 
+                room.players.forEach((p, i) => { 
+                    assigned[p] = [
+                        shuffled[(i*3) % shuffled.length] || GAME_DATA.safetyPrompts[0],
+                        shuffled[(i*3 + 1) % shuffled.length] || GAME_DATA.safetyPrompts[1],
+                        shuffled[(i*3 + 2) % shuffled.length] || GAME_DATA.safetyPrompts[2]
+                    ]; 
+                });
+                await db.ref(`rooms/${roomCode}`).update({ phase: 'gen', detailsPerStory: detCount, playTimerMode: playT, selTimerSet: selT, assignedPrompts: assigned, phaseEndTime: Date.now() + genT * 60000 });
+            }
+        }
+
+        // --- PHASE: GEN ---
+        function startGenUI() {
+            show('gen'); genStep = 1; genFinished = false; 
+            if(room.detailsPerStory === '0') genStep = 1; 
+            updateGenDisplay();
+            startSyncTimer(room.phaseEndTime, 'gen-timer', async () => { await submitGen(true); });
+        }
+        function updateGenDisplay() {
+            document.getElementById('gen-input').value = ""; document.getElementById('gen-custom').value = "";
+            const myTemplates = room.assignedPrompts ? room.assignedPrompts[myName] : GAME_DATA.prompts;
+            if(genStep <= 3) {
+                document.getElementById('gen-label').innerText = `PROMPT ${genStep}/3`;
+                document.getElementById('gen-instruction').innerText = "Fill in the blank:";
+                const currentPrompt = myTemplates[genStep - 1] || "A mysterious ___ appears.";
+                document.getElementById('gen-template').innerHTML = currentPrompt.replace("___", '<span class="blank-text">______</span>');
+            } else {
+                document.getElementById('gen-label').innerText = `DETAIL ${genStep-3}/3`;
+                document.getElementById('gen-instruction').innerText = "Suggest a detail to include:";
+                document.getElementById('gen-template').innerText = "e.g. 'A blue feather', 'The smell of rain'";
+                document.getElementById('gen-custom').placeholder = "Type detail here...";
+            }
+        }
+        async function submitGen(isAuto = false) {
+            const maxGenSteps = room.detailsPerStory === '0' ? 3 : 6;
+            if(genStep > maxGenSteps) return;
+            const myTemplates = room.assignedPrompts ? room.assignedPrompts[myName] : GAME_DATA.prompts;
+            
+            let val = document.getElementById('gen-custom').value;
+            if(!val) {
+                const inputVal = document.getElementById('gen-input').value;
+                if(genStep <= 3) {
+                    const currentPrompt = myTemplates[genStep - 1] || "A mysterious ___ appears.";
+                    val = currentPrompt.replace("___", inputVal || "something weird");
+                }
+                else val = inputVal || GAME_DATA.details[Math.floor(Math.random() * GAME_DATA.details.length)];
+            }
+            
+            const path = genStep <= 3 ? 'pool/prompts' : 'pool/details';
+            await db.ref(`rooms/${roomCode}/${path}`).push({ author: myName, text: val });
+
+            if(genStep < maxGenSteps) { genStep++; updateGenDisplay(); if(isAuto) await submitGen(true); } 
+            else { genStep++; genFinished = true; if(timerInt) clearInterval(timerInt); show('wait'); }
+        }
+
+        // --- PHASE: DIRECT ---
+        function startDirectUI() {
+            show('direct'); genFinished = false; sendDetailIndex = 0; 
+            document.getElementById('direct-prompt').value = ""; document.getElementById('direct-detail-input').value = "";
+            myDirectDetailsList = []; maxDirectDet = (room.detailsPerStory === 'upto2' || room.detailsPerStory === '2') ? 2 : parseInt(room.detailsPerStory);
+            
+            if(maxDirectDet === 0) document.getElementById('direct-details-box').style.display = 'none';
+            else { document.getElementById('direct-details-box').style.display = 'block'; document.getElementById('my-det-max').innerText = maxDirectDet; renderDirectDetails(); }
+            startSyncTimer(room.phaseEndTime, 'direct-timer', submitDirect);
+        }
+        function addMyDirectDetail(txt = null) {
+            let val = txt || document.getElementById('direct-detail-input').value.trim();
+            if(!val) return;
+            if(myDirectDetailsList.length >= maxDirectDet) return showPopup("MAX REACHED!");
+            myDirectDetailsList.push(val);
+            if(!txt) document.getElementById('direct-detail-input').value = "";
+            renderDirectDetails();
+        }
+        async function sendDirectDetail() {
+            let val = document.getElementById('direct-detail-input').value.trim();
+            if(!val) return;
+            
+            let others = room.players.filter(p => p !== myName); 
+            if(others.length === 0) others = [myName];
+            
+            let counts = others.map(p => {
+                let count = (room.sentDetails && room.sentDetails[p]) ? Object.keys(room.sentDetails[p]).length : 0;
+                return { name: p, count: count };
+            });
+            let minCount = Math.min(...counts.map(c => c.count));
+            let tiedPlayers = counts.filter(c => c.count === minCount).map(c => c.name);
+            let target = tiedPlayers[Math.floor(Math.random() * tiedPlayers.length)];
+            
+            await db.ref(`rooms/${roomCode}/sentDetails/${target}`).push(val);
+            document.getElementById('direct-detail-input').value = ""; showPopup(`SENT TO ${target}!`);
+        }
+        function renderDirectDetails() {
+            document.getElementById('my-det-count').innerText = myDirectDetailsList.length;
+            document.getElementById('my-direct-details').innerHTML = myDirectDetailsList.map((d, i) => `<span class="tag" style="cursor:pointer; background:#10b981;" onclick="removeMyDirectDetail(${i})">${d} ✖</span>`).join('');
+        }
+        function removeMyDirectDetail(index) { myDirectDetailsList.splice(index, 1); renderDirectDetails(); }
+        async function submitDirect() {
+            if(genFinished) return; genFinished = true; if(timerInt) clearInterval(timerInt);
+            const prompt = document.getElementById('direct-prompt').value || GAME_DATA.safetyPrompts[0];
+            let details = [...myDirectDetailsList];
+            if(room.detailsPerStory !== '0') {
+                let reqDet = room.detailsPerStory === 'upto2' ? 2 : parseInt(room.detailsPerStory);
+                if(room.detailsPerStory !== 'upto2') { while(details.length < reqDet) details.push(GAME_DATA.details[Math.floor(Math.random() * GAME_DATA.details.length)]); }
+            }
+            show('wait');
+            let updates = {}; updates[`stories/${myName}`] = { prompt, details, segments: [] }; updates[`selectDone/${myName}`] = true;
+            await db.ref(`rooms/${roomCode}`).update(updates);
+        }
+
+        // --- PHASE: SELECT ---
+        function startSelectUI() {
+            show('select'); mySelections = { prompt: "", details: [] };
+            const allPrompts = Object.values(room.pool.prompts || {});
+            let otherPrompts = allPrompts.filter(p => p.author !== myName).map(p => p.text);
+            if(otherPrompts.length < 3) otherPrompts = [...otherPrompts, ...GAME_DATA.safetyPrompts];
+            const prompts = shuffleArray(otherPrompts).slice(0, 3); 
+            
+            document.getElementById('select-prompts').innerHTML = prompts.map(p => `<div class="pill" onclick="selP(this, \`${p.replace(/`/g,"")}\`)">${p}</div>`).join('');
+            
+            let maxDet = room.detailsPerStory === 'upto2' ? 2 : parseInt(room.detailsPerStory);
+            if(maxDet > 0) {
+                document.getElementById('select-details-card').style.display = 'block';
+                const allDetails = Object.values(room.pool.details || {});
+                let otherDetails = allDetails.filter(d => d.author !== myName).map(d => d.text);
+                if(otherDetails.length < 3) otherDetails = [...otherDetails, ...GAME_DATA.details];
+                const details = shuffleArray(otherDetails).slice(0, 5); 
+                document.getElementById('select-detail-label').innerText = room.detailsPerStory === 'upto2' ? `Choose up to 2 Details:` : `Choose exactly ${maxDet} Detail(s):`;
+                document.getElementById('select-details').innerHTML = details.map(d => `<div class="pill" onclick="selD(this, \`${d.replace(/`/g,"")}\`, ${maxDet})">${d}</div>`).join('');
+            } else { document.getElementById('select-details-card').style.display = 'none'; }
+            startSyncTimer(room.phaseEndTime, 'select-timer', confirmSelection); 
+        }
+        function selP(el, val) { document.querySelectorAll('#select-prompts .pill').forEach(p => p.classList.remove('selected')); el.classList.add('selected'); mySelections.prompt = val; }
+        function selD(el, val, maxDet) {
+            if(mySelections.details.includes(val)) { el.classList.remove('selected'); mySelections.details = mySelections.details.filter(d => d !== val); } 
+            else if(mySelections.details.length < maxDet) { el.classList.add('selected'); mySelections.details.push(val); }
+        }
+        async function confirmSelection() {
+            if(timerInt) clearInterval(timerInt);
+            if(!mySelections.prompt) {
+                const allP = Object.values(room.pool.prompts || {});
+                const otherP = allP.filter(p => p.author !== myName).map(p => p.text);
+                mySelections.prompt = otherP.length > 0 ? shuffleArray(otherP)[0] : GAME_DATA.safetyPrompts[0];
+            }
+            if(room.detailsPerStory === '0') { mySelections.details = []; } 
+            else if (room.detailsPerStory !== 'upto2') { let reqDet = parseInt(room.detailsPerStory); while(mySelections.details.length < reqDet) mySelections.details.push(GAME_DATA.details[Math.floor(Math.random() * GAME_DATA.details.length)]); }
+            show('wait'); 
+            let updates = {}; updates[`stories/${myName}`] = { prompt: mySelections.prompt, details: mySelections.details }; updates[`selectDone/${myName}`] = true;
+            await db.ref(`rooms/${roomCode}`).update(updates);
+        }
+
+        // --- PHASE: PLAY ---
+        function startPlayUI() {
+            show('play'); 
+            let s, roundNum, playerCount, endTime;
+            if(isLocalGame) { s = localStory; roundNum = localRound; playerCount = localPlayers.length; endTime = localPhaseEndTime; }
+            else { const myIdx = room.players.indexOf(myName); const storyOwner = room.players[(myIdx + room.currentRound) % room.players.length]; s = room.stories[storyOwner]; roundNum = room.currentRound; playerCount = room.players.length; endTime = room.phaseEndTime; }
+            
+            document.getElementById('round-label').innerText = `ROUND ${roundNum + 1} / ${playerCount}`;
+            document.getElementById('play-orig-prompt').innerText = s.prompt;
+            document.getElementById('play-details-container').innerHTML = (s.details || []).map(d => `<span class="tag">${d}</span>`).join('');
+            
+            let segmentsArray = s.segments ? (Array.isArray(s.segments) ? s.segments : Object.values(s.segments)) : [];
+            if(roundNum === 0) { document.getElementById('prev-segment-card').style.display = 'none'; showPopup("🎬 YOU'RE STARTING!"); } 
+            else { 
+                document.getElementById('prev-segment-card').style.display = 'block'; 
+                document.getElementById('play-prev-segment').innerText = segmentsArray.length > 0 ? segmentsArray[segmentsArray.length-1].text : "No previous segment found."; 
+                if(roundNum === playerCount - 1) showPopup("🔥 GRAND FINALE!"); else showPopup("✍️ KEEP IT GOING");
+            }
+
+            document.getElementById('writing-area').value = "";
+            startSyncTimer(endTime, 'play-timer', submitWriting);
+        }
+        async function submitWriting() {
+            if(timerInt) clearInterval(timerInt);
+            const txt = document.getElementById('writing-area').value || "...";
+            show('wait'); 
+            if(isLocalGame) {
+                localStory.segments.push({ author: localPlayers[localRound], text: txt });
+                localRound++; if(localRound < localPlayers.length) startLocalHandoff(); else showReveal();
+            } else {
+                const myIdx = room.players.indexOf(myName); const storyOwner = room.players[(myIdx + room.currentRound) % room.players.length];
+                const snap = await db.ref(`rooms/${roomCode}/stories/${storyOwner}/segments`).get();
+                let segs = snap.exists() ? snap.val() : []; if (!Array.isArray(segs)) segs = Object.values(segs);
+                segs.push({ author: myName, text: txt });
+                let updates = {}; updates[`stories/${storyOwner}/segments`] = segs; updates[`ready/${myName}`] = room.currentRound;
+                await db.ref(`rooms/${roomCode}`).update(updates);
+            }
+        }
+
+        // --- PHASE: TITLE ---
+        function startTitleUI() {
+            show('title'); showPopup("🏷️ NAME YOUR STORY"); document.getElementById('title-input').value = "";
+            
+            const s = room.stories[myName]; 
+            let segs = s.segments ? (Array.isArray(s.segments) ? s.segments : Object.values(s.segments)) : [];
+            let mySeg = segs.find(seg => seg.author === myName);
+            
+            let out = `<p style="color:var(--yellow); font-weight:bold;">Your Contribution:</p>`;
+            out += `<p style="font-size:16px;">${mySeg ? mySeg.text : "You didn't write anything for this story!"}</p>`;
+            
+            document.getElementById('title-story-preview').innerHTML = out;
+            startSyncTimer(room.phaseEndTime, 'title-timer', submitTitle);
+        }
+        async function submitTitle() {
+            if(timerInt) clearInterval(timerInt);
+            const t = document.getElementById('title-input').value || "The Untitled Epic"; 
+            show('wait');
+            
+            let updates = {};
+            updates[`stories/${myName}/title`] = t;
+            updates[`titlesDone/${myName}`] = true;
+            await db.ref(`rooms/${roomCode}`).update(updates);
+        }
+
+        // --- PHASE: REVEAL ---
+        function showReveal() {
+            show('reveal'); 
+            if (Object.keys(revealedCounts).length === 0) {
+                if (isLocalGame) { 
+                    revealStories = [{ owner: "Local Group", ...localStory }]; 
+                    revealIndex = 0; 
+                    revealedCounts["Local Group"] = 1;
+                } else { 
+                    revealStories = Object.keys(room.stories).map(k => ({ owner: k, ...room.stories[k] })); 
+                    revealIndex = revealStories.findIndex(s => s.owner === myName); 
+                    if (revealIndex === -1) revealIndex = 0; 
+                    revealStories.forEach(s => revealedCounts[s.owner] = 1);
+                }
+            }
+            
+            renderRevealStory('center');
+        }
+
+        function revealSpecificPart(i) {
+            const s = revealStories[revealIndex];
+            if (i === revealedCounts[s.owner]) { revealNextPart(); } 
+            else if (i > revealedCounts[s.owner]) { showPopup("Reveal previous parts first!"); }
+        }
+
+        function revealNextPart() {
+            const s = revealStories[revealIndex];
+            let segmentsArray = s.segments ? (Array.isArray(s.segments) ? s.segments : Object.values(s.segments)) : [];
+            let currentIdx = revealedCounts[s.owner];
+
+            if (currentIdx < segmentsArray.length) {
+                const segEl = document.getElementById(`seg-content-${currentIdx}`);
+                const overEl = document.getElementById(`seg-over-${currentIdx}`);
+                if (segEl) {
+                    segEl.classList.remove('obscured');
+                }
+                if (overEl) overEl.style.display = 'none';
+                
+                revealedCounts[s.owner]++;
+                playSfx('pop');
+                updateRevealButtons();
+            }
+        }
+
+        function renderRevealStory(direction) {
+            const container = document.getElementById('stories-output');
+            if (direction !== 'none') { container.className = ''; void container.offsetWidth; container.className = 'slide-' + direction; }
+            
+            const s = revealStories[revealIndex]; const title = s.title || `Started by ${s.owner}`;
+            let segmentsArray = s.segments ? (Array.isArray(s.segments) ? s.segments : Object.values(s.segments)) : [];
+            
+            let authors = segmentsArray.map(seg => seg.author);
+            let coAuthors = [...new Set(authors.filter(a => a !== s.owner))];
+            let authorText = `AUTHORED BY ${s.owner.toUpperCase()}`;
+            if(coAuthors.length > 0) authorText += `<br><span style="font-size:10px; color:var(--muted)">CO-AUTHORED BY ${coAuthors.join(', ').toUpperCase()}</span>`;
+            if(isLocalGame) authorText = "AUTHORED BY THE GROUP";
+
+            let out = `<div class="card" style="margin-bottom:20px; min-height: 250px;">
+                <h2 style="color:white; text-shadow:2px 2px var(--btn-shadow); text-align:center; font-size:32px; margin-bottom:5px;">${title}</h2>
+                <div style="text-align:center; margin-bottom:15px; font-size:12px; color:var(--accent); font-weight:bold;">${authorText}</div>`;
+                
+            if(s.details && s.details.length > 0) { out += `<div style="text-align:center; margin-bottom:15px;">`; s.details.forEach(d => out += `<span class="tag">${d}</span>`); out += `</div>`; }
+            out += `<p style="color:var(--yellow); font-style:italic; font-weight:700; text-align:center; font-size:18px;">${s.prompt}</p><hr style="border:0; border-top:3px solid rgba(255,255,255,0.1); margin:20px 0;">`;
+            
+            segmentsArray.forEach((seg, i) => {
+                let isRevealed = i < revealedCounts[s.owner];
+                out += `
+                <div class="segment-card" onclick="${!isRevealed ? `revealSpecificPart(${i})` : ''}">
+                    <div id="seg-content-${i}" class="segment-content ${isRevealed ? '' : 'obscured'}">
+                        <b style="color:var(--accent);">${seg.author}:</b> ${seg.text}
+                    </div>
+                    ${!isRevealed ? `<div id="seg-over-${i}" class="segment-overlay"><div class="badge">✨ TAP TO REVEAL</div></div>` : ''}
+                </div>`;
+            });
+            
+            out += `</div>`; container.innerHTML = out;
+            
+            const btnPrev = document.getElementById('btn-prev');
+            const btnNext = document.getElementById('btn-next');
+            const btnUturn = document.getElementById('btn-uturn');
+
+            if (revealStories.length > 1) {
+                btnPrev.style.display = 'block'; btnNext.style.display = 'block'; btnUturn.style.display = 'block';
+            } else {
+                btnPrev.style.display = 'none'; btnNext.style.display = 'none'; btnUturn.style.display = 'none';
+            }
+
+            if (!isLocalGame) {
+                const myStoryIndex = revealStories.findIndex(st => st.owner === myName);
+                if (revealIndex === myStoryIndex) { btnUturn.style.opacity = '0.3'; btnUturn.style.pointerEvents = 'none'; } 
+                else { btnUturn.style.opacity = '1'; btnUturn.style.pointerEvents = 'auto'; }
+            }
+            
+            updateRevealButtons();
+        }
+
+        function updateRevealButtons() {
+            const s = revealStories[revealIndex];
+            let segmentsArray = s.segments ? (Array.isArray(s.segments) ? s.segments : Object.values(s.segments)) : [];
+            const btnReveal = document.getElementById('btn-reveal-part');
+            const btnSave = document.getElementById('btn-save');
+            
+            if (revealedCounts[s.owner] < segmentsArray.length) {
+                btnReveal.style.display = 'block';
+                btnSave.style.display = 'none';
+            } else {
+                btnReveal.style.display = 'none';
+                btnSave.style.display = 'block';
+            }
+        }
+
+        function nextStory() { revealIndex = (revealIndex + 1) % revealStories.length; renderRevealStory('right'); playSfx('turn'); }
+        function prevStory() { revealIndex = (revealIndex - 1 + revealStories.length) % revealStories.length; renderRevealStory('left'); playSfx('turn');}
+        function returnToMyStory() { revealIndex = revealStories.findIndex(s => s.owner === myName); renderRevealStory('center'); playSfx('turn');}
+        
+        function downloadCurrentStory() {
+            const s = revealStories[revealIndex]; const title = s.title || `Started by ${s.owner}`;
+            let content = `WONTON WRITER RESULT\n\nTITLE: ${title}\n`;
+            if(s.details) { content += `REQUIRED DETAILS: ${s.details.join(', ')}\n`; }
+            content += `\nPROMPT: ${s.prompt}\n\n`;
+            let segmentsArray = s.segments ? (Array.isArray(s.segments) ? s.segments : Object.values(s.segments)) : [];
+            segmentsArray.forEach(seg => content += `[${seg.author}]: ${seg.text}\n`);
+            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+            a.download = `wonton-${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`; a.click();
+        }
+
+        /* =====================================================================
+           10. WAITING ROOM & MINIGAME
+           ===================================================================== */
+        function getWaitCount() {
+            if(isLocalGame) return `${localRound} / ${localPlayers.length} Done`;
+            if(!room) return "0 / 0 Ready";
+            const tot = room.players.length;
+            if(room.phase === 'gen') { const pCount = room.pool && room.pool.prompts ? Math.floor(Object.keys(room.pool.prompts).length / 3) : 0; return `${pCount > tot ? tot : pCount} / ${tot} Done`; }
+            if(room.phase === 'direct' || room.phase === 'select') return `${room.selectDone ? Object.keys(room.selectDone).length : 0} / ${tot} Done`;
+            if(room.phase === 'play') return `${room.ready ? Object.values(room.ready).filter(v => v === room.currentRound).length : 0} / ${tot} Done`;
+            if(room.phase === 'title') return `${room.titlesDone ? Object.keys(room.titlesDone).length : 0} / ${tot} Done`;
+            return `Wait...`;
+        }
+
+        function startWaitScreenTools() {
+            if(tooltipInt) clearInterval(tooltipInt);
+            tooltipInt = setInterval(() => { document.getElementById('wait-tooltip').innerText = GAME_DATA.tooltips[Math.floor(Math.random()*GAME_DATA.tooltips.length)]; }, 5000);
+            if(waitTimerInt) clearInterval(waitTimerInt);
+            let endTime = isLocalGame ? localPhaseEndTime : (room ? room.phaseEndTime : null);
+            if(endTime) {
+                waitTimerInt = setInterval(() => {
+                    let t = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+                    let m = Math.floor(t/60), s = t%60;
+                    document.getElementById('wait-timer-display').innerText = `${m}:${s<10?'0':''}${s}`;
+                }, 1000);
+            }
+            startMinigame();
+        }
+
+        let mgTimerInt = null, mgTimeLeft = 60;
+        let mgScore = 0, mgHigh = parseInt(localStorage.getItem('mgHigh')) || 0, mgStrikes = 0, mgActive = false;
+
+        function startMinigame() {
+            mgActive = true; mgScore = 0; mgStrikes = 0; mgTimeLeft = 60;
+            document.getElementById('mg-high').innerText = "High: " + mgHigh;
+            document.getElementById('mg-over').style.display = 'none';
+            
+            if(mgTimerInt) clearInterval(mgTimerInt);
+            mgTimerInt = setInterval(() => {
+                if(!mgActive) return clearInterval(mgTimerInt);
+                mgTimeLeft--;
+                document.getElementById('mg-time').innerText = "⏳ " + mgTimeLeft + "s";
+                if(mgTimeLeft <= 0) {
+                    endMinigame("TIME'S UP!");
+                }
+            }, 1000);
+            
+            updateMgUI(); spawnMgWave();
+        }
+
+        function endMinigame(msg) {
+            mgActive = false; 
+            if(mgTimerInt) clearInterval(mgTimerInt);
+            document.getElementById('mg-over').style.display = 'flex';
+            document.getElementById('mg-over-msg').innerText = msg;
+            document.querySelectorAll('.mg-bubble').forEach(e => e.remove());
+            if(mgScore > mgHigh) { mgHigh = mgScore; localStorage.setItem('mgHigh', mgHigh); document.getElementById('mg-high').innerText = "High: " + mgHigh; }
+            playSfx('buzz');
+        }
+
+        function updateMgUI() {
+            document.getElementById('mg-time').innerText = "⏳ " + mgTimeLeft + "s";
+            document.getElementById('mg-score').innerText = "Score: " + mgScore;
+            document.getElementById('mg-strikes').innerText = "❌ " + mgStrikes + "/3";
+            if(mgStrikes >= 3) {
+                endMinigame("STRIKE 3!");
+            }
+        }
+        
+        function spawnMgWave() {
+            if(!mgActive) return;
+            document.querySelectorAll('.mg-bubble').forEach(e => e.remove());
+            
+            const group = GAME_DATA.wordGroups[Math.floor(Math.random() * GAME_DATA.wordGroups.length)];
+            let groupCopy = shuffleArray([...group]);
+            const targetWord = groupCopy.pop(); 
+            
+            document.getElementById('mg-target').innerText = targetWord;
+            
+            let spawns = [
+                { text: targetWord, correct: true },
+                { text: targetWord, correct: true }
+            ];
+            
+            for(let i=0; i<5; i++) {
+                if (groupCopy[i]) spawns.push({ text: groupCopy[i], correct: false });
+            }
+            
+            spawns = shuffleArray(spawns);
+            spawns.forEach((s) => {
+                const el = document.createElement('div'); el.className = 'mg-bubble'; el.innerText = s.text;
+                el.style.top = (10 + Math.random() * 70) + "%"; el.style.left = (10 + Math.random() * 70) + "%";
+                el.style.animationDelay = (Math.random() * 2) + "s";
+                el.onclick = () => {
+                    if(!mgActive) return;
+                    if(s.correct) { 
+                        mgScore++; playSfx('pop'); updateMgUI(); spawnMgWave();
+                    } else { 
+                        mgStrikes++; playSfx('tick'); updateMgUI(); 
+                    }
+                };
+                document.getElementById('minigame-area').appendChild(el);
+            });
+        }
+
+        /* =====================================================================
+           11. LOCAL GAME ENGINE
+           ===================================================================== */
+        function startLocalMode() { if(roomCode && room) { db.ref('rooms/'+roomCode).off(); } isLocalGame = true; localPlayers = []; show('local-setup'); }
+        function renderLocalPlayers() {
+            document.getElementById('local-player-list').innerHTML = localPlayers.map((p, index) => `<div class="pill" style="display:flex; justify-content:space-between; align-items:center;"><span>${p}</span><button class="btn-ghost" style="border:none; color:#ef4444; padding:5px 10px; font-size:12px;" onclick="removeLocalPlayer(${index})">✖</button></div>`).join('');
+        }
+        function removeLocalPlayer(index) { localPlayers.splice(index, 1); renderLocalPlayers(); }
+        function addLocalPlayer() { const input = document.getElementById('local-new-player'); const name = input.value.trim(); if(name && !localPlayers.includes(name)) { localPlayers.push(name); input.value = ""; renderLocalPlayers(); } }
+        function startLocalSelection() {
+            if(localPlayers.length < 2) return alert("Need at least 2 players!");
+            localTimerOverride = getCustomTimerValue('local-setting-timer', 'local-custom-play-val');
+            const customPrompt = document.getElementById('local-custom-prompt')?.value.trim();
+            const prompt = customPrompt || GAME_DATA.safetyPrompts[0];
+            const reqDetVal = document.getElementById('local-setting-details').value;
+            const details = []; 
+            if(reqDetVal === 'upto2') { const num = Math.floor(Math.random() * 3); for(let i=0; i<num; i++) details.push(GAME_DATA.details[Math.floor(Math.random() * GAME_DATA.details.length)]); } 
+            else { for(let i=0; i<parseInt(reqDetVal); i++) details.push(GAME_DATA.details[Math.floor(Math.random() * GAME_DATA.details.length)]); }
+            localStory = { prompt, details, segments: [] }; localRound = 0; startLocalHandoff();
+        }
+        function startLocalHandoff() { show('handoff'); document.getElementById('handoff-name').innerText = localPlayers[localRound]; }
+        function acceptHandoff() { localPhaseEndTime = Date.now() + getPlayTime(localPlayers.length, localRound) * 1000; startPlayUI(); }
+
+        /* =====================================================================
+           12. DEV BOTS
+           ===================================================================== */
+        async function initDevMode() {
+            myName = myName || "DevMaster"; isDevMode = true; roomCode = "DEV" + Math.floor(Math.random()*999);
+            
+            const statusColor = isDataLive ? '#10b981' : '#ef4444';
+            const statusText = isDataLive ? '● LIVE' : '● LOCAL';
+            document.querySelector('.text-logo-sub').innerHTML = `WRITER <span style="font-size:16px; color:${statusColor}; vertical-align:middle;">${statusText}</span>`;
+
+            await db.ref('rooms/'+roomCode).set({ code: roomCode, host: myName, players: [myName, ...bots], phase: 'lobby', currentRound: 0, isDev: true });
+            document.getElementById('dev-tools').style.display = 'block'; document.getElementById('host-settings').style.display = 'block';
+            initListener(); show('lobby');
+        }
+        
+        async function runBotActions() {
+            if (!room) return;
+            if (room.phase === 'gen' && !window.botsGenerated) {
+                window.botsGenerated = true; bots.forEach(bot => { for(let i=0; i<3; i++) { db.ref(`rooms/${roomCode}/pool/prompts`).push({author: bot, text: `[${bot}] randomly generated prompt ${i+1}`}); db.ref(`rooms/${roomCode}/pool/details`).push({author: bot, text: `[${bot}] detail ${i+1}`}); } });
+            } else if (room.phase === 'direct') {
+                let updates = {}; bots.forEach(bot => { if (!room.selectDone?.[bot]) { updates[`stories/${bot}`] = { prompt: `[${bot}] wrote a custom starter...`, details: [`${bot} custom 1`, `${bot} custom 2`], segments: [] }; updates[`selectDone/${bot}`] = true; } });
+                if (Object.keys(updates).length > 0) await db.ref(`rooms/${roomCode}`).update(updates);
+            } else if (room.phase === 'select') {
+                let updates = {}; bots.forEach(bot => { if (!room.selectDone?.[bot]) { updates[`stories/${bot}`] = { prompt: `[${bot}]'s auto-selected starting prompt...`, details: [`${bot} detail 1`, `${bot} detail 2`], segments: [] }; updates[`selectDone/${bot}`] = true; } });
+                if (Object.keys(updates).length > 0) await db.ref(`rooms/${roomCode}`).update(updates);
+            } else if (room.phase === 'play') {
+                const snap = await db.ref(`rooms/${roomCode}/stories`).get(); let stories = snap.val() || {}; let updates = {};
+                bots.forEach(bot => {
+                    if (room.ready?.[bot] !== room.currentRound) {
+                        const bIdx = room.players.indexOf(bot); const owner = room.players[(bIdx + room.currentRound) % room.players.length];
+                        let segs = stories[owner].segments || []; if (!Array.isArray(segs)) segs = Object.values(segs);
+                        segs.push({ author: bot, text: `\n[${bot}] writes for round ${room.currentRound + 1}. They added some crazy plot twist here.` });
+                        updates[`stories/${owner}/segments`] = segs; updates[`ready/${bot}`] = room.currentRound;
+                    }
+                });
+                if (Object.keys(updates).length > 0) await db.ref(`rooms/${roomCode}`).update(updates);
+            } else if (room.phase === 'title') {
+                let updates = {}; bots.forEach(bot => { if (!room.titlesDone?.[bot]) { updates[`stories/${bot}/title`] = `The Ballad of ${bot}`; updates[`titlesDone/${bot}`] = true; } });
+                if (Object.keys(updates).length > 0) await db.ref(`rooms/${roomCode}`).update(updates);
+            }
+        }
+    </script>
 </body>
 </html>
