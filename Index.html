@@ -421,10 +421,10 @@
         let revealStories = [], revealIndex = 0, revealedCounts = {};
         let isDevMode = false, bots = ["Bot 1", "Bot 2", "Bot 3"];
         let myDirectDetailsList = [], maxDirectDet = 2, sendDetailIndex = 0;
-        let isDataLive = false; // Tracks if GitHub data loaded successfully
+        let isDataLive = false; 
 
         /* =====================================================================
-           4. AUDIO ENGINE
+           4. AUDIO ENGINE & GLOBAL CLICK LISTENER
            ===================================================================== */
         let audioCtx;
         function initAudio() { try { if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
@@ -441,6 +441,22 @@
             } catch(e){}
         }
 
+        // Global sound effect listener for all standard buttons/pills
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.btn') || e.target.closest('.btn-ghost');
+            const pill = e.target.closest('.pill');
+            
+            if(btn) {
+                const txt = btn.innerText;
+                // Exclude specific buttons that trigger their own unique sounds
+                if(!txt.includes('◀') && !txt.includes('▶') && !txt.includes('↩️') && !txt.includes('REVEAL PART') && !txt.includes('Retry')) {
+                    playSfx('pop');
+                }
+            } else if (pill && (!pill.parentElement || !pill.parentElement.id.includes('player-list'))) {
+                playSfx('pop');
+            }
+        });
+
         /* =====================================================================
            5. UTILITY FUNCTIONS & INITIALIZATION
            ===================================================================== */
@@ -450,7 +466,6 @@
             if(savedName) document.getElementById('input-name').value = savedName;
             if(savedCode) document.getElementById('input-code').value = savedCode;
 
-            // Fetch live data from GitHub
             try {
                 const response = await fetch('https://raw.githubusercontent.com/NosracTN2/Wonton-writer/main/data.json', { cache: "no-store" });
                 if (response.ok) {
@@ -510,7 +525,7 @@
                 let m = Math.floor(t/60), s = t%60;
                 let el = document.getElementById(elId);
                 if(el) el.innerText = `${m}:${s<10?'0':''}${s}`;
-                if(t <= 10 && t > 0) playSfx('tick'); 
+                if(t <= 15 && t > 0) playSfx('tick'); 
                 if(t <= 0) { clearInterval(timerInt); timerInt = null; if(onEnd) onEnd(); }
             }, 1000);
         }
@@ -575,7 +590,7 @@
         }
 
         /* =====================================================================
-           8. MASTER STATE LISTENER (The Phase Router)
+           8. MASTER STATE LISTENER & HOST AUTO-ADVANCE
            ===================================================================== */
         function initListener() {
             db.ref('rooms/'+roomCode).on('value', snap => {
@@ -589,7 +604,6 @@
                     return;
                 }
 
-                // Update UI elements that persist across states
                 if(document.getElementById('screen-wait').classList.contains('active')) document.getElementById('wait-counter').innerText = getWaitCount();
                 document.getElementById('display-code').innerText = room.code;
                 document.getElementById('player-count').innerText = `Players (${room.players.length})`;
@@ -636,9 +650,85 @@
                         break;
                 }
 
-                // --- HOST PROGRESSION CHECKS ---
                 if(room.host === myName && !window.advancingPhase) checkHostProgression();
             });
+        }
+
+        // Global Loop: Host checks for AFK/Disconnected players to force advancement
+        setInterval(() => {
+            if(room && room.host === myName && room.phaseEndTime && !window.advancingPhase) {
+                // Give 3 seconds grace period after timer ends
+                if(Date.now() > room.phaseEndTime + 3000) { 
+                    window.advancingPhase = true;
+                    forceHostAdvance();
+                }
+            }
+        }, 2000);
+
+        async function forceHostAdvance() {
+            if(!room) return;
+            let updates = {};
+            let missingData = false;
+            
+            if (room.phase === 'direct') {
+                room.players.forEach(p => {
+                    if(!room.selectDone || !room.selectDone[p]) {
+                        updates[`stories/${p}`] = { prompt: GAME_DATA.safetyPrompts[Math.floor(Math.random()*GAME_DATA.safetyPrompts.length)], details: [GAME_DATA.details[0], GAME_DATA.details[1]], segments: [] };
+                        updates[`selectDone/${p}`] = true;
+                        missingData = true;
+                    }
+                });
+            } else if (room.phase === 'select') {
+                room.players.forEach(p => {
+                    if(!room.selectDone || !room.selectDone[p]) {
+                        updates[`stories/${p}`] = { prompt: GAME_DATA.safetyPrompts[Math.floor(Math.random()*GAME_DATA.safetyPrompts.length)], details: [] };
+                        updates[`selectDone/${p}`] = true;
+                        missingData = true;
+                    }
+                });
+            } else if (room.phase === 'play') {
+                const snap = await db.ref(`rooms/${roomCode}/stories`).get();
+                let stories = snap.val() || {};
+                room.players.forEach(p => {
+                    if(!room.ready || room.ready[p] !== room.currentRound) {
+                        const pIdx = room.players.indexOf(p);
+                        const owner = room.players[(pIdx + room.currentRound) % room.players.length];
+                        let segs = stories[owner].segments || [];
+                        if (!Array.isArray(segs)) segs = Object.values(segs);
+                        segs.push({ author: p, text: "... (Time ran out)" });
+                        updates[`stories/${owner}/segments`] = segs;
+                        updates[`ready/${p}`] = room.currentRound;
+                        missingData = true;
+                    }
+                });
+            } else if (room.phase === 'title') {
+                room.players.forEach(p => {
+                    if(!room.titlesDone || !room.titlesDone[p]) {
+                        updates[`stories/${p}/title`] = "Untitled Story";
+                        updates[`titlesDone/${p}`] = true;
+                        missingData = true;
+                    }
+                });
+            } else if (room.phase === 'gen') {
+                const pCount = room.pool && room.pool.prompts ? Object.keys(room.pool.prompts).length : 0;
+                const dCount = room.pool && room.pool.details ? Object.keys(room.pool.details).length : 0;
+                const req = room.players.length * 3;
+                if(pCount < req) { 
+                    for(let i=pCount; i<req; i++) updates[`pool/prompts/${db.ref().push().key}`] = { author: "Auto-Host", text: GAME_DATA.safetyPrompts[Math.floor(Math.random()*GAME_DATA.safetyPrompts.length)] }; 
+                    missingData = true; 
+                }
+                if(room.detailsPerStory !== '0' && dCount < req) { 
+                    for(let i=dCount; i<req; i++) updates[`pool/details/${db.ref().push().key}`] = { author: "Auto-Host", text: GAME_DATA.details[Math.floor(Math.random()*GAME_DATA.details.length)] }; 
+                    missingData = true; 
+                }
+            }
+
+            if(missingData) {
+                await db.ref(`rooms/${roomCode}`).update(updates);
+            } else {
+                checkHostProgression();
+            }
+            setTimeout(() => { window.advancingPhase = false; }, 1500);
         }
 
         function checkHostProgression() {
@@ -812,8 +902,16 @@
                 document.getElementById('select-details-card').style.display = 'block';
                 const allDetails = Object.values(room.pool.details || {});
                 let otherDetails = allDetails.filter(d => d.author !== myName).map(d => d.text);
-                if(otherDetails.length < 3) otherDetails = [...otherDetails, ...GAME_DATA.details];
-                const details = shuffleArray(otherDetails).slice(0, 5); 
+                
+                // Request 4: Exactly 3 from players (fill with safety if not enough), 2 straight from safety
+                let playerDets = shuffleArray(otherDetails).slice(0, 3);
+                while(playerDets.length < 3) {
+                    playerDets.push(GAME_DATA.details[Math.floor(Math.random() * GAME_DATA.details.length)]);
+                }
+                
+                let safetyDets = shuffleArray([...GAME_DATA.details]).slice(0, 2);
+                const details = shuffleArray([...playerDets, ...safetyDets]); 
+                
                 document.getElementById('select-detail-label').innerText = room.detailsPerStory === 'upto2' ? `Choose up to 2 Details:` : `Choose exactly ${maxDet} Detail(s):`;
                 document.getElementById('select-details').innerHTML = details.map(d => `<div class="pill" onclick="selD(this, \`${d.replace(/`/g,"")}\`, ${maxDet})">${d}</div>`).join('');
             } else { document.getElementById('select-details-card').style.display = 'none'; }
