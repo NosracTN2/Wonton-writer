@@ -1,11 +1,18 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <style>
-    html, body, iframe { margin: 0; padding: 0; height: 100%; width: 100%; border: none; }
-  </style>
-</head>
+<head><meta charset="UTF-8"></head>
 <body>
-  <iframe src="https://gist.githubusercontent.com/NosracTN2/ce6a2efa9c0586b8d6d07d579649ebb1/raw/Index.html"></iframe>
+<script>
+fetch("https://gist.githubusercontent.com/NosracTN2/ce6a2efa9c0586b8d6d07d579649ebb1/raw/Index.html")
+  .then(res => res.text())
+  .then(html => {
+    document.open();
+    document.write(html);
+    document.close();
+  })
+  .catch(() => {
+    document.body.innerHTML = "Couldn't load the game — try refreshing.";
+  });
+</script>
 </body>
 </html>
